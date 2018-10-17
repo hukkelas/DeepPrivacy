@@ -35,3 +35,16 @@ nvidia-docker run --rm  -it -v $PWD:/app  -e CUDA_VISIBLE_DEVICES=1 coolImageNam
 `coolImageName` is the docker image to use (created in step 1) 
 
 On `telenor001` server the image `pytorch-gpu-ext` can be used as well.
+
+
+
+# Milestones
+
+1. Replicate Progressive - GAN
+2. Train with context information
+
+# TODO:
+
+1. Implement CelebA
+2. Implement upscaling of GAN
+3. Train on generated data
