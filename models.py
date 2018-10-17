@@ -1,3 +1,4 @@
+
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -16,21 +17,21 @@ class Generator(nn.Module):
             )
 
         self.model = nn.Sequential(
-            conv_bn_relu(100,128, 4, 3),
+            conv_bn_relu(100, 128, 4, 3),
             conv_bn_relu(128, 128, 3, 1),
 
             # Upsample: 8x8
-            nn.Upsample(scale_factor=2),
+            UpSamplingBlock(),
             conv_bn_relu(128, 64, 3, 1),
             conv_bn_relu(64, 64, 3, 1),
 
             # Upsample 16x16
-            nn.Upsample(scale_factor=2),
+            UpSamplingBlock(),
             conv_bn_relu(64,32,3,1),
             conv_bn_relu(32, 32, 3, 1),
 
             # Upsample 32x32
-            nn.Upsample(scale_factor=2),
+            UpSamplingBlock(),
             conv_bn_relu(32, 16, 3),
             conv_bn_relu(16, 16, 3),
             nn.Conv2d(16, 1, 1),
@@ -56,30 +57,31 @@ class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
 
-        def conv_module(dim_in, dim_out, kernel_size, padding):
+        def conv_module(dim_in, dim_out, kernel_size, padding, image_width):
             return nn.Sequential(
                 nn.Conv2d(dim_in, dim_out, kernel_size, padding=padding),
+                nn.LayerNorm([dim_out, image_width, image_width]),
                 nn.LeakyReLU()
             )
         self.model = nn.Sequential(
-            conv_module(1, 16, 1, 2),
-            conv_module(16, 16, 3, 1),
-            conv_module(16, 32, 3, 1),
+            conv_module(1, 16, 1, 2, 32),
+            conv_module(16, 16, 3, 1, 32),
+            conv_module(16, 32, 3, 1, 32),
 
             # Downsample 16x16
             nn.AvgPool2d([2, 2]), 
-            conv_module(32, 32, 3, 1),
-            conv_module(32, 64, 3, 1),
+            conv_module(32, 32, 3, 1, 16),
+            conv_module(32, 64, 3, 1, 16),
 
             # Downsample 8x8
             nn.AvgPool2d([2, 2]),
-            conv_module(64, 64, 3, 1),
-            conv_module(64, 128, 3, 1),
+            conv_module(64, 64, 3, 1, 8),
+            conv_module(64, 128, 3, 1, 8),
 
             # Downsample 4x4
             nn.AvgPool2d([2, 2]),
-            conv_module(128, 128, 3, 1),
-            conv_module(128, 128, 4, 0) 
+            conv_module(128, 128, 3, 1, 4),
+            conv_module(128, 128, 4, 0, 1) 
         )
         self.linear = nn.Sequential(
             nn.Linear(128, 1),
