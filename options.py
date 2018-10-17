@@ -1,5 +1,5 @@
 from optparse import OptionParser
-from random_word_generator.main import random_word
+from wordgenerator import generate_random_word
 import os
 DEFAULT_NUM_EPOCHS = 50
 DEFAULT_BATCH_SIZE = 64
@@ -35,7 +35,7 @@ def load_options():
                       default=DEFAULT_NUM_EPOCHS, type=int)
     parser.add_option("--name", "--model-name", dest="model_name",
                       help="Set the name of the model",
-                      default=random_word(), type=str)
+                      default=generate_random_word(), type=str)
     options, _ = parser.parse_args()
     options.checkpoint_dir = os.path.join("checkpoints", options.model_name)
     options.generated_data_dir = os.path.join("generated_data", options.model_name)

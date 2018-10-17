@@ -7,3 +7,4 @@ tensorboardX
 tqdm
 tflib
 torchsummary
+wordgenerator
