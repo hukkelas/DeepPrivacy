@@ -1,0 +1,8 @@
+data/
+generated/
+generated_data/
+checkpoints/
+summaries/
+.vscode
+__pycache__
+*.zip

@@ -1,0 +1,9 @@
+cython
+numpy
+scikit-learn>=0.2
+matplotlib
+pandas
+tensorboardX
+tqdm
+tflib
+torchsummary
