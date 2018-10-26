@@ -99,7 +99,9 @@ def main(options):
 
     global_step = 0
     for epoch in range(start_epoch, options.num_epochs):
-        for i, (real_data, _) in tqdm.tqdm(enumerate(data_loader), total=len(data_loader), desc="Global step: {}".format(global_step)):
+        for i, (real_data, _) in tqdm.tqdm(enumerate(data_loader), 
+                                           total=len(data_loader),
+                                           desc="Global step: {:10.0f}".format(global_step)):
 
             generator.train()
             global_step += 1

@@ -49,8 +49,8 @@ class Generator(nn.Module):
     def __init__(self, noise_dim):
         super(Generator, self).__init__()
         # Transition blockss
-        self.new_end_model = EqualizedConv2D(128, 1, 1, 0)
-        self.old_end_model = EqualizedConv2D(128, 1, 1, 0)
+        self.to_rgb_new = EqualizedConv2D(128, 1, 1, 0)
+        self.to_rgb_old = EqualizedConv2D(128, 1, 1, 0)
         self.new_block = nn.Sequential(
         )
         self.core_model = nn.Sequential(
@@ -62,7 +62,7 @@ class Generator(nn.Module):
     
     def extend(self, output_dim):
         # Find input shape
-        input_dim = self.new_end_model.conv.weight.shape[1]
+        input_dim = self.to_rgb_new.conv.weight.shape[1]
         self.core_model = nn.Sequential(
             self.core_model,
             self.new_block,
@@ -73,9 +73,9 @@ class Generator(nn.Module):
             conv_bn_relu(output_dim, output_dim, 3, 1)
         )
         self.new_block = to_cuda(self.new_block) 
-        self.old_end_model = self.new_end_model
-        self.new_end_model = EqualizedConv2D(output_dim, 1, 1,0)
-        self.new_end_model = to_cuda(self.new_end_model)
+        self.to_rgb_old = self.to_rgb_new
+        self.to_rgb_new = EqualizedConv2D(output_dim, 1, 1,0)
+        self.to_rgb_new = to_cuda(self.to_rgb_new)
 
 
     # x: Bx1x1x512
@@ -85,9 +85,9 @@ class Generator(nn.Module):
         x = x.view(x.shape[0], -1, 4, 4)
         
         x = self.core_model(x)
-        x_old = self.old_end_model(x)
+        x_old = self.to_rgb_old(x)
         x_new = self.new_block(x)
-        x_new = self.new_end_model(x_new)        
+        x_new = self.to_rgb_new(x_new)        
         x = get_transition_value(x_old, x_new, transition_variable)
         return x
 
@@ -104,44 +104,31 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.image_channels = in_channels
         self.current_input_imsize = 4
-        self.new_start_model = nn.Sequential(
-            conv_module(in_channels,128,1,0,self.current_input_imsize)
-        ) 
-        self.old_start_model = nn.Sequential(
-            conv_module(in_channels,128,1,0,self.current_input_imsize),
-        ) 
+        self.from_rgb_new = conv_module(in_channels,128,1,0,self.current_input_imsize)
+
+        self.from_rgb_old = conv_module(in_channels,128,1,0,self.current_input_imsize)
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
             conv_module(128, 128, 3, 1, imsize),
             conv_module(128, 128, 4, 0, 1),            
         )
-        self.linear = nn.Sequential(
-            nn.Linear(128, 1),
-        )
+        self.output_layer = nn.Linear(128, 1)
+
         
     def extend(self, input_dim):
         
         self.current_input_imsize *= 2
-        output_dim = list(self.new_start_model.parameters())[1].shape[0]
-        new_core_model = nn.Sequential()
-        idx = 0
-        if self.new_block is not None:
-            for _, module in self.new_block.named_children():
-                new_core_model.add_module(str(idx), module)
-                idx +=1
-        for _, module in self.core_model.named_children():
-            new_core_model.add_module(str(idx), module)
-            idx += 1
-        self.core_model = new_core_model
-        self.old_start_model = nn.Sequential(
+        output_dim = list(self.from_rgb_new.parameters())[1].shape[0]
+        self.core_model = nn.Sequential(
+            self.new_block,
+            self.core_model
+        )
+        self.from_rgb_old = nn.Sequential(
             nn.AvgPool2d([2,2]),
+            self.from_rgb_new
         )
-        for idx, (name, module) in enumerate(self.new_start_model.named_children()):
-            self.old_start_model.add_module(str(idx+1), module)
-        self.new_start_model = nn.Sequential(
-            conv_module(self.image_channels, input_dim, 1,0,self.current_input_imsize)
-        )
-        self.new_start_model = to_cuda(self.new_start_model)
+        self.from_rgb_new = conv_module(self.image_channels, input_dim, 1, 0,self.current_input_imsize)
+        self.from_rgb_new = to_cuda(self.from_rgb_new)
         self.new_block = nn.Sequential(
             conv_module(input_dim, input_dim, 3, 1, self.current_input_imsize),
             conv_module(input_dim, output_dim, 3, 1, self.current_input_imsize),
@@ -153,13 +140,13 @@ class Discriminator(nn.Module):
 
     # x: Bx1x1x512
     def forward(self, x, transition_variable=1):
-        x_old = self.old_start_model(x)
-        x_new = self.new_start_model(x)
+        x_old = self.from_rgb_old(x)
+        x_new = self.from_rgb_new(x)
         x_new = self.new_block(x_new)
         x = get_transition_value(x_old, x_new, transition_variable)
         x = self.core_model(x)
         x = x.view(-1, 128)
-        x = self.linear(x)
+        x = self.output_layer(x)
         return x
 
 
