@@ -3,10 +3,17 @@ import torchvision.datasets as datasets
 import torch
 
 
-def load_mnist(batch_size):
-    transform = transforms.Compose(
-        [transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5], std=[0.5])])
+def load_mnist(batch_size, imsize=32):
+    transform = [
+        transforms.Pad(2)
+    ]
+    if imsize != 32:
+        transform +=  [transforms.Resize([imsize, imsize])]
+    transform += [
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5], std=[0.5])
+    ]
+    transform = transforms.Compose(transform)
     imagenet_data = datasets.MNIST('data/mnist_data', 
                                 train=True, 
                                 download=True,
