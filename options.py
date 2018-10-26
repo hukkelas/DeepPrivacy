@@ -1,12 +1,28 @@
 from optparse import OptionParser
 from wordgenerator import generate_random_word
 import os
+import math
 DEFAULT_NUM_EPOCHS = 50
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_N_CRITIC = 1
 DEFAULT_LEARNING_RATE = 0.0002
 DEFAULT_NOISE_DIM = 100
 DEFAULT_IMSIZE = 4
+DEFAULT_MAX_IMSIZE = 32
+DEFAULT_START_CHANNEL_SIZE = 128
+DEFALUT_DATASET = "mnist"
+
+# 4 -> 8 // 128 -> 64
+# 8 -> 16 // 64 -> 32
+# 16 -> 32 // 32 -> 16
+# 
+
+def validate_start_channel_size(max_imsize, start_channel_size):
+    # Assert start channel size is valid with the max imsize
+    # Number of times to double 
+    n_image_double =  math.log(max_imsize, 2) - 2 # starts at 4
+    n_channel_halving = math.log(start_channel_size, 2)
+    assert n_image_double < n_channel_halving
 
 def print_options(options):
     dic = vars(options)
@@ -39,12 +55,34 @@ def load_options():
     parser.add_option("--imsize", dest="imsize",
                       help="Set the image size for discriminator and generator",
                       default=DEFAULT_IMSIZE, type=int)
+    parser.add_option("--max-imsize", dest="max_imsize",
+                      help="Set the final image size for the discriminator and generator",
+                      default=DEFAULT_MAX_IMSIZE, type=int)
+    parser.add_option("--start-channel-size", dest="start_channel_size",
+                      help="Set the channel start size for Discriminator and Generator",
+                      default=DEFAULT_START_CHANNEL_SIZE, type=int)
+    parser.add_option("--dataset", dest="dataset",
+                      help="Set the dataset to load",
+                      default=DEFALUT_DATASET)
+
+    
+
+    
     options, _ = parser.parse_args()
+
+    validate_start_channel_size(options.max_imsize, options.start_channel_size)
+
+
     options.checkpoint_dir = os.path.join("checkpoints", options.model_name)
     options.generated_data_dir = os.path.join("generated_data", options.model_name)
     options.summaries_dir = os.path.join("summaries", options.model_name)
     os.makedirs(options.checkpoint_dir, exist_ok=True)
     os.makedirs(options.generated_data_dir, exist_ok=True)
+    
+    if options.dataset == "mnist":
+        options.image_channels = 1
+    else:
+        options.image_channels = 3
 
     print_options(options)
     return options

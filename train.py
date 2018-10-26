@@ -8,7 +8,7 @@ from models import Generator, Discriminator
 import tqdm
 from torchsummary import summary
 import os
-from dataloaders import load_mnist
+from dataloaders import load_mnist, load_cifar10
 from options import load_options
 
 
@@ -30,15 +30,15 @@ def gradient_penalty(real_data, fake_data, discriminator):
     return grad_penalty
 
 
-def init_model(imsize, noise_dim):
-    discriminator = Discriminator(1, imsize)
-    generator = Generator(noise_dim)
+def init_model(imsize, noise_dim, start_channel_dim, image_channels):
+    discriminator = Discriminator(image_channels, imsize, start_channel_dim)
+    generator = Generator(noise_dim, start_channel_dim, image_channels)
     to_cuda([discriminator, generator])
     discriminator.apply(init_weights)
     generator.apply(init_weights)
     print("="*80)
     print("DISCRIMINATOR")
-    summary(discriminator, (1, imsize, imsize))
+    summary(discriminator, (image_channels, imsize, imsize))
     print("="*80)
     print("GENERATOR")
     summary(generator, (1, noise_dim))
@@ -59,19 +59,29 @@ def save_images(writer, images, global_step, directory):
     image_grid = torchvision.utils.make_grid(images, normalize=True, nrow=10)
     writer.add_image("Image", image_grid, global_step)
 
-def normalize_img(images):
-    images = images - images.min()
-    images = images / images.max()
-    return images
+def normalize_img(image):
+
+    image[:, 0, :, :] = image[:, 0, :, :] * 0.2023 + 0.4914
+    image[:, 1, :, :] = image[:, 1, :, :] * 0.1994 + 0.4822
+    image[:, 2, :, :] = image[:, 2, :, :] * 0.2010 + 0.4465
+    
+    return image
+
+
+def load_dataset(dataset, batch_size, imsize):
+    if dataset == "mnist":
+        return load_mnist(batch_size, imsize)
+    if dataset == "cifar10":
+        return load_cifar10(batch_size, imsize)
 
 
 def main(options):
-    data_loader = load_mnist(options.batch_size, options.imsize)
+    data_loader = load_dataset(options.dataset, options.batch_size, options.imsize)
     
-    discriminator, generator = init_model(options.imsize, options.noise_dim)
-    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.5, 0.999))
-    g_optimizer = torch.optim.Adam(generator.parameters(), lr=options.learning_rate, betas=(0.5, 0.999))
-
+    discriminator, generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels)
+    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999))
+    g_optimizer = torch.optim.Adam(generator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999))
+    
     """ load checkpoint """
 
     try:
@@ -87,16 +97,14 @@ def main(options):
 
 
     """ run """
+    current_imsize = options.imsize
+    current_channels = options.start_channel_size // 2
     writer = tensorboardX.SummaryWriter(options.summaries_dir)
     transition_variable = 1
     transition_iters = 5000
     transition_step = 0
-    z_sample = generate_noise(100, options.noise_dim)
+    z_sample = generate_noise(options.noise_dim, options.noise_dim)
     is_transitioning = False
-    transition_channels = [64, 32, 16]
-    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999), weight_decay=0)
-    g_optimizer = torch.optim.Adam(generator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999), weight_decay=0)
-
     global_step = 0
     for epoch in range(start_epoch, options.num_epochs):
         for i, (real_data, _) in tqdm.tqdm(enumerate(data_loader), 
@@ -164,32 +172,32 @@ def main(options):
                 imsize = real_data.shape[2]
                 filename = "step{0}_{1}x{1}.jpg".format(global_step, imsize)
                 filepath = os.path.join("input_images", filename)
-                image_grid = torchvision.utils.make_grid(real_data[:100], normalize=True, nrow=10)
                 #writer.add_image("Image", image_grid, global_step)
-                torchvision.utils.save_image(real_data[:100], filepath, nrow=10)
+                torchvision.utils.save_image(normalize_img(real_data[:100]), filepath, nrow=10)
 
             
             if global_step % transition_iters == 0:
                 #print("TRANSITION SWITCH")
+
                 if global_step % (transition_iters*2) == 0:
                     # Stop transitioning
                     is_transitioning = False
                     transition_variable = 1.0
-                elif transition_step < len(transition_channels):
+                elif current_imsize < options.max_imsize:
 
                     fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
                     print("GENSWITCH", fake_data_sample.max(), fake_data_sample.min())
                     fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
                     print("GENSWITCH", fake_data_sample.max(), fake_data_sample.min())                    
 
-                    channels = transition_channels[transition_step]
-                    discriminator.extend(channels)
-                    generator.extend(channels)
+                    discriminator.extend(current_channels)
+                    generator.extend(current_channels)
                     transition_step += 1
-                    imsize = options.imsize * (2**transition_step)
+                    current_imsize *= 2
+                    current_channels = current_channels // 2
                     summary(generator, (options.noise_dim, 1,1))
-                    summary(discriminator, (1, imsize, imsize))
-                    data_loader = load_mnist(options.batch_size, imsize)
+                    summary(discriminator, (options.image_channels, current_imsize, current_imsize))
+                    data_loader = load_dataset(options.dataset, options.batch_size, current_imsize)
                     is_transitioning = True
                     d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999), weight_decay=0)
                     g_optimizer = torch.optim.Adam(generator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999), weight_decay=0)
