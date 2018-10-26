@@ -6,7 +6,7 @@ DEFAULT_BATCH_SIZE = 64
 DEFAULT_N_CRITIC = 4
 DEFAULT_LEARNING_RATE = 0.0002
 DEFAULT_NOISE_DIM = 100
-
+DEFAULT_IMSIZE=4
 
 def print_options(options):
     dic = vars(options)
@@ -36,6 +36,9 @@ def load_options():
     parser.add_option("--name", "--model-name", dest="model_name",
                       help="Set the name of the model",
                       default=generate_random_word(), type=str)
+    parser.add_option("--imsize", dest="imsize",
+                      help="Set the image size for discriminator and generator",
+                      default=DEFAULT_IMSIZE, type=int)
     options, _ = parser.parse_args()
     options.checkpoint_dir = os.path.join("checkpoints", options.model_name)
     options.generated_data_dir = os.path.join("generated_data", options.model_name)

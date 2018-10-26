@@ -30,15 +30,18 @@ def gradient_penalty(real_data, fake_data, discriminator):
     return grad_penalty
 
 
-def init_model():
-    discriminator = Discriminator()
-    generator = Generator()
+def init_model(imsize, noise_dim):
+    discriminator = Discriminator(1, imsize)
+    generator = Generator(noise_dim)
     to_cuda([discriminator, generator])
     discriminator.apply(init_weights)
     generator.apply(init_weights)
-
-    summary(discriminator, (1, 28, 28))
-    summary(generator, (1, 100))
+    print("="*80)
+    print("DISCRIMINATOR")
+    summary(discriminator, (1, imsize, imsize))
+    print("="*80)
+    print("GENERATOR")
+    summary(generator, (1, noise_dim))
     return discriminator, generator
 
 
@@ -49,17 +52,23 @@ def generate_noise(batch_size, noise_dim):
 
 
 def save_images(writer, images, global_step, directory):
-    filename = "step{}.jpg".format(global_step)
+    imsize = images.shape[2]
+    filename = "step{0}_{1}x{1}.jpg".format(global_step, imsize)
     filepath = os.path.join(directory, filename)
     torchvision.utils.save_image(images, filepath, nrow=10)
     image_grid = torchvision.utils.make_grid(images, normalize=True, nrow=10)
     writer.add_image("Image", image_grid, global_step)
 
+def normalize_img(images):
+    images = images - images.min()
+    images = images / images.max()
+    return images
+
 
 def main(options):
-    data_loader = load_mnist(options.batch_size)
+    data_loader = load_mnist(options.batch_size, options.imsize)
     
-    discriminator, generator = init_model()
+    discriminator, generator = init_model(options.imsize, options.noise_dim)
     d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.5, 0.999))
     g_optimizer = torch.optim.Adam(generator.parameters(), lr=options.learning_rate, betas=(0.5, 0.999))
 
@@ -79,23 +88,33 @@ def main(options):
 
     """ run """
     writer = tensorboardX.SummaryWriter(options.summaries_dir)
-
+    transition_variable = 1
+    transition_iters = 5000
+    transition_step = 0
     z_sample = generate_noise(100, options.noise_dim)
+    is_transitioning = False
+    transition_channels = [64, 32, 16]
+    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999), weight_decay=0)
+    g_optimizer = torch.optim.Adam(generator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999), weight_decay=0)
+
+    global_step = 0
     for epoch in range(start_epoch, options.num_epochs):
         for i, (real_data, _) in tqdm.tqdm(enumerate(data_loader), total=len(data_loader)):
-            generator.train()
-            global_step = epoch * len(data_loader) + i + 1
 
+            generator.train()
+            global_step += 1
+            if is_transitioning:
+                transition_variable = ((global_step-1) % transition_iters) / transition_iters
             real_data = Variable(real_data)
             real_data = to_cuda(real_data)
             z = generate_noise(real_data.shape[0], options.noise_dim)
 
-            fake_data = generator(z)
+            fake_data = generator(z, transition_variable)
 
             # Train Discriminator
-            real_logits = discriminator(real_data)
-            fake_logits = discriminator(fake_data.detach())
-
+            real_logits = discriminator(real_data, transition_variable)
+            fake_logits = discriminator(fake_data.detach(), transition_variable)
+            
             wasserstein_distance = real_logits.mean() - fake_logits.mean()  # Wasserstein-1 Distance
             gradient_pen = gradient_penalty(real_data.data, fake_data.data, discriminator)
             D_loss = -wasserstein_distance + gradient_pen * 10.0
@@ -111,10 +130,13 @@ def main(options):
             if global_step % options.n_critic == 0:
                 # Train Generator
                 z = generate_noise(real_data.shape[0], options.noise_dim)
-                fake_data = generator(z)
-                fake_logits = discriminator(fake_data)
+                fake_data = generator(z, transition_variable)
+                fake_logits = discriminator(fake_data, transition_variable)
                 G_loss = -fake_logits.mean()
-
+                writer.add_scalars("generator/fadein-constant", {
+                    "fadin constant": transition_variable},
+                    global_step=global_step
+                )
                 discriminator.zero_grad()
                 generator.zero_grad()
                 G_loss.backward()
@@ -131,8 +153,56 @@ def main(options):
 
             if (global_step+1) % 100 == 0:
                 generator.eval()
-                fake_data_sample = (generator(z_sample).data + 1) / 2.0
+                fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
+                #print(fake_data_sample.max(), fake_data_sample.min())
                 save_images(writer, fake_data_sample, global_step, options.generated_data_dir)
+
+                # Save input images
+                os.makedirs("input_images", exist_ok=True)
+                imsize = real_data.shape[2]
+                filename = "step{0}_{1}x{1}.jpg".format(global_step, imsize)
+                filepath = os.path.join("input_images", filename)
+                image_grid = torchvision.utils.make_grid(real_data[:100], normalize=True, nrow=10)
+                #writer.add_image("Image", image_grid, global_step)
+                torchvision.utils.save_image(real_data[:100], filepath, nrow=10)
+
+            
+            if global_step % transition_iters == 0:
+                #print("TRANSITION SWITCH")
+                if global_step % (transition_iters*2) == 0:
+                    # Stop transitioning
+                    is_transitioning = False
+                    transition_variable = 1.0
+                elif transition_step < len(transition_channels):
+
+                    fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
+                    print("GENSWITCH", fake_data_sample.max(), fake_data_sample.min())
+                    fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
+                    print("GENSWITCH", fake_data_sample.max(), fake_data_sample.min())                    
+
+                    channels = transition_channels[transition_step]
+                    discriminator.extend(channels)
+                    generator.extend(channels)
+                    transition_step += 1
+                    imsize = options.imsize * (2**transition_step)
+                    summary(generator, (options.noise_dim, 1,1))
+                    summary(discriminator, (1, imsize, imsize))
+                    data_loader = load_mnist(options.batch_size, imsize)
+                    is_transitioning = True
+                    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999), weight_decay=0)
+                    g_optimizer = torch.optim.Adam(generator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999), weight_decay=0)
+
+
+                    fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
+                    print("GENSWITCH", fake_data_sample.max(), fake_data_sample.min())
+                    os.makedirs("lol", exist_ok=True)
+                    filepath = os.path.join("lol", "test.jpg")
+                    torchvision.utils.save_image(fake_data_sample[:100], filepath, nrow=10)
+                    #save_images(writer, fake_data_sample, global_step, options.generated_data_dir)
+
+
+                    break
+
 
 
         filename = "Epoch_{}.ckpt".format(epoch)
