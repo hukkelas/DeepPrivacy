@@ -46,15 +46,16 @@ class UpSamplingBlock(nn.Module):
 
 class Generator(nn.Module):
 
-    def __init__(self, noise_dim):
+    def __init__(self, noise_dim, start_channel_dim, image_channels):
         super(Generator, self).__init__()
         # Transition blockss
-        self.to_rgb_new = EqualizedConv2D(128, 1, 1, 0)
-        self.to_rgb_old = EqualizedConv2D(128, 1, 1, 0)
+        self.image_channels = image_channels
+        self.to_rgb_new = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
+        self.to_rgb_old = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
         self.new_block = nn.Sequential(
         )
         self.core_model = nn.Sequential(
-            conv_bn_relu(noise_dim, 128, 3, 1),            
+            conv_bn_relu(noise_dim, start_channel_dim, 3, 1),            
         )
         self.first_block = nn.Sequential(
             nn.Linear(noise_dim, noise_dim*4*4)
@@ -74,7 +75,7 @@ class Generator(nn.Module):
         )
         self.new_block = to_cuda(self.new_block) 
         self.to_rgb_old = self.to_rgb_new
-        self.to_rgb_new = EqualizedConv2D(output_dim, 1, 1,0)
+        self.to_rgb_new = EqualizedConv2D(output_dim, self.image_channels, 1,0)
         self.to_rgb_new = to_cuda(self.to_rgb_new)
 
 
@@ -100,19 +101,19 @@ def conv_module(dim_in, dim_out, kernel_size, padding, image_width):
 
 class Discriminator(nn.Module):
 
-    def __init__(self, in_channels, imsize):
+    def __init__(self, in_channels, imsize, start_channel_dim):
         super(Discriminator, self).__init__()
         self.image_channels = in_channels
         self.current_input_imsize = 4
-        self.from_rgb_new = conv_module(in_channels,128,1,0,self.current_input_imsize)
+        self.from_rgb_new = conv_module(in_channels, start_channel_dim, 1, 0, self.current_input_imsize)
 
-        self.from_rgb_old = conv_module(in_channels,128,1,0,self.current_input_imsize)
+        self.from_rgb_old = conv_module(in_channels, start_channel_dim, 1, 0, self.current_input_imsize)
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
-            conv_module(128, 128, 3, 1, imsize),
-            conv_module(128, 128, 4, 0, 1),            
+            conv_module(start_channel_dim, start_channel_dim, 3, 1, imsize),
+            conv_module(start_channel_dim, start_channel_dim, 4, 0, 1),            
         )
-        self.output_layer = nn.Linear(128, 1)
+        self.output_layer = nn.Linear(start_channel_dim, 1)
 
         
     def extend(self, input_dim):
