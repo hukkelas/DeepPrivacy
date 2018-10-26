@@ -5,9 +5,22 @@ from torch.autograd import Variable
 from utils import to_cuda, init_weights
 
 
+class EqualizedConv2D(nn.Module):
+
+    def __init__(self, in_dim, out_dim, kernel_size, padding):
+        super(EqualizedConv2D, self).__init__()
+
+        self.conv = nn.Conv2d(in_dim, out_dim, kernel_size, padding=padding)
+        self.conv.apply(init_weights)
+        self.conv.bias.data = self.conv.bias.data.zero_() 
+        self.conv = nn.utils.weight_norm(self.conv)
+    
+    def forward(self, x):
+        return self.conv(x)
+
 def conv_bn_relu(in_dim, out_dim, kernel_size, padding=0):
     return nn.Sequential(
-        nn.Conv2d(in_dim, out_dim, [kernel_size, kernel_size], padding=padding),
+        EqualizedConv2D(in_dim, out_dim, kernel_size, padding),
         PixelwiseNormalization(),
         nn.LeakyReLU()
     )
@@ -36,12 +49,8 @@ class Generator(nn.Module):
     def __init__(self, noise_dim):
         super(Generator, self).__init__()
         # Transition blockss
-        self.new_end_model = nn.Sequential(
-            nn.Conv2d(128, 1, 1),
-        ) 
-        self.old_end_model = nn.Sequential(
-            nn.Conv2d(128, 1, 1),
-        ) 
+        self.new_end_model = EqualizedConv2D(128, 1, 1, 0)
+        self.old_end_model = EqualizedConv2D(128, 1, 1, 0)
         self.new_block = nn.Sequential(
         )
         self.core_model = nn.Sequential(
@@ -53,7 +62,7 @@ class Generator(nn.Module):
     
     def extend(self, output_dim):
         # Find input shape
-        input_dim = next(self.new_end_model.parameters()).shape[1]
+        input_dim = self.new_end_model.conv.weight.shape[1]
         self.core_model = nn.Sequential(
             self.core_model,
             self.new_block,
@@ -65,13 +74,8 @@ class Generator(nn.Module):
         )
         self.new_block = to_cuda(self.new_block) 
         self.old_end_model = self.new_end_model
-        self.new_end_model = nn.Sequential(
-            nn.Conv2d(output_dim, 1, 1),
-        )
+        self.new_end_model = EqualizedConv2D(output_dim, 1, 1,0)
         self.new_end_model = to_cuda(self.new_end_model)
-
-        self.new_end_model.apply(init_weights)
-        self.new_block.apply(init_weights)
 
 
     # x: Bx1x1x512
@@ -90,7 +94,7 @@ class Generator(nn.Module):
 
 def conv_module(dim_in, dim_out, kernel_size, padding, image_width):
     return nn.Sequential(
-        nn.Conv2d(dim_in, dim_out, kernel_size, padding=padding),
+        EqualizedConv2D(dim_in, dim_out, kernel_size, padding),
         nn.LeakyReLU()
     )
 
@@ -118,7 +122,7 @@ class Discriminator(nn.Module):
     def extend(self, input_dim):
         
         self.current_input_imsize *= 2
-        output_dim = next(self.new_start_model.parameters()).shape[0]
+        output_dim = list(self.new_start_model.parameters())[1].shape[0]
         new_core_model = nn.Sequential()
         idx = 0
         if self.new_block is not None:
@@ -145,8 +149,6 @@ class Discriminator(nn.Module):
         )
         self.new_block = to_cuda(self.new_block)
 
-        self.new_block.apply(init_weights)
-        self.new_start_model.apply(init_weights)
 
 
     # x: Bx1x1x512
