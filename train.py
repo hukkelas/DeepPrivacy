@@ -36,12 +36,8 @@ def init_model(imsize, noise_dim, start_channel_dim, image_channels):
     to_cuda([discriminator, generator])
     discriminator.apply(init_weights)
     generator.apply(init_weights)
-    print("="*80)
-    print("DISCRIMINATOR")
-    summary(discriminator, (image_channels, imsize, imsize))
-    print("="*80)
-    print("GENERATOR")
-    summary(generator, (1, noise_dim))
+    discriminator.summary()
+    generator.summary()
     return discriminator, generator
 
 
@@ -60,10 +56,12 @@ def save_images(writer, images, global_step, directory):
     writer.add_image("Image", image_grid, global_step)
 
 def normalize_img(image):
-
-    image[:, 0, :, :] = image[:, 0, :, :] * 0.2023 + 0.4914
-    image[:, 1, :, :] = image[:, 1, :, :] * 0.1994 + 0.4822
-    image[:, 2, :, :] = image[:, 2, :, :] * 0.2010 + 0.4465
+    if image.shape[1] == 3:
+        image[:, 0, :, :] = image[:, 0, :, :] * 0.2023 + 0.4914
+        image[:, 1, :, :] = image[:, 1, :, :] * 0.1994 + 0.4822
+        image[:, 2, :, :] = image[:, 2, :, :] * 0.2010 + 0.4465
+    else:
+        image = image * 0.5 + 0.5
     
     return image
 
@@ -101,9 +99,9 @@ def main(options):
     current_channels = options.start_channel_size // 2
     writer = tensorboardX.SummaryWriter(options.summaries_dir)
     transition_variable = 1
-    transition_iters = 5000
+    transition_iters = 10000
     transition_step = 0
-    z_sample = generate_noise(options.noise_dim, options.noise_dim)
+    z_sample = generate_noise(100, options.noise_dim)
     is_transitioning = False
     global_step = 0
     for epoch in range(start_epoch, options.num_epochs):
@@ -184,19 +182,12 @@ def main(options):
                     is_transitioning = False
                     transition_variable = 1.0
                 elif current_imsize < options.max_imsize:
-
-                    fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
-                    print("GENSWITCH", fake_data_sample.max(), fake_data_sample.min())
-                    fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
-                    print("GENSWITCH", fake_data_sample.max(), fake_data_sample.min())                    
-
                     discriminator.extend(current_channels)
                     generator.extend(current_channels)
                     transition_step += 1
                     current_imsize *= 2
                     current_channels = current_channels // 2
-                    summary(generator, (options.noise_dim, 1,1))
-                    summary(discriminator, (options.image_channels, current_imsize, current_imsize))
+                    discriminator.summary(), generator.summary()
                     data_loader = load_dataset(options.dataset, options.batch_size, current_imsize)
                     is_transitioning = True
                     d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999), weight_decay=0)
@@ -204,7 +195,6 @@ def main(options):
 
 
                     fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
-                    print("GENSWITCH", fake_data_sample.max(), fake_data_sample.min())
                     os.makedirs("lol", exist_ok=True)
                     filepath = os.path.join("lol", "test.jpg")
                     torchvision.utils.save_image(fake_data_sample[:100], filepath, nrow=10)

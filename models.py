@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from utils import to_cuda, init_weights
-
+from torchsummary import summary
 
 class EqualizedConv2D(nn.Module):
 
@@ -21,8 +21,8 @@ class EqualizedConv2D(nn.Module):
 def conv_bn_relu(in_dim, out_dim, kernel_size, padding=0):
     return nn.Sequential(
         EqualizedConv2D(in_dim, out_dim, kernel_size, padding),
-        PixelwiseNormalization(),
-        nn.LeakyReLU()
+        nn.LeakyReLU(),
+        PixelwiseNormalization()
     )
 
 
@@ -36,7 +36,7 @@ class PixelwiseNormalization(nn.Module):
 
     def forward(self, x):
         factor = (x**2).mean(dim=1, keepdim=True)**0.5
-        return x / factor
+        return x / (factor + 1e-8)
 
 class UpSamplingBlock(nn.Module):
     def __init__(self):
@@ -50,15 +50,17 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         # Transition blockss
         self.image_channels = image_channels
+        self.noise_dim = noise_dim
         self.to_rgb_new = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
         self.to_rgb_old = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
         self.new_block = nn.Sequential(
         )
         self.core_model = nn.Sequential(
-            conv_bn_relu(noise_dim, start_channel_dim, 3, 1),            
+            conv_bn_relu(start_channel_dim, start_channel_dim, 3, 1),            
         )
         self.first_block = nn.Sequential(
-            nn.Linear(noise_dim, noise_dim*4*4)
+            PixelwiseNormalization(),
+            conv_bn_relu(noise_dim, start_channel_dim, 4, 3)
         )
     
     def extend(self, output_dim):
@@ -81,7 +83,7 @@ class Generator(nn.Module):
 
     # x: Bx1x1x512
     def forward(self, x, transition_variable=1):
-        x = x.view((x.shape[0], -1))
+        x = x.view((x.shape[0], self.noise_dim, 1, 1))
         x = self.first_block(x)
         x = x.view(x.shape[0], -1, 4, 4)
         
@@ -91,6 +93,11 @@ class Generator(nn.Module):
         x_new = self.to_rgb_new(x_new)        
         x = get_transition_value(x_old, x_new, transition_variable)
         return x
+    
+    def summary(self):
+        print("="*80)
+        print("GENERATOR")
+        summary(self, (self.noise_dim, 1, 1))
 
 
 def conv_module(dim_in, dim_out, kernel_size, padding, image_width):
@@ -146,9 +153,14 @@ class Discriminator(nn.Module):
         x_new = self.new_block(x_new)
         x = get_transition_value(x_old, x_new, transition_variable)
         x = self.core_model(x)
-        x = x.view(-1, 128)
+        x = x.view(x.shape[0], -1)
         x = self.output_layer(x)
         return x
+    
+    def summary(self):
+        print("="*80)
+        print("GENERATOR")
+        summary(self, (self.image_channels, self.current_input_imsize, self.current_input_imsize))
 
 
 if __name__ == "__main__":
