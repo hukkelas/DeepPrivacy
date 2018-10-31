@@ -2,7 +2,7 @@ from optparse import OptionParser
 from wordgenerator import generate_random_word
 import os
 import math
-DEFAULT_NUM_EPOCHS = 50
+DEFAULT_NUM_EPOCHS = 500
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_N_CRITIC = 1
 DEFAULT_LEARNING_RATE = 0.0002

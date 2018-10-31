@@ -4,13 +4,13 @@ from torch.autograd import Variable
 import torchvision
 import utils
 from utils import init_weights, load_checkpoint, save_checkpoint, to_cuda
-from models import Generator, Discriminator
+from models import Generator, Discriminator, get_transition_value
 import tqdm
 from torchsummary import summary
 import os
-from dataloaders import load_mnist, load_cifar10
+from dataloaders import load_mnist, load_cifar10, load_pokemon
 from options import load_options
-
+import time
 
 def gradient_penalty(real_data, fake_data, discriminator):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() -1)
@@ -26,7 +26,7 @@ def gradient_penalty(real_data, fake_data, discriminator):
         grad_outputs=to_cuda(torch.ones(logits.shape)),
         create_graph=True
     )[0].view(x_hat.shape[0], -1)
-    grad_penalty = ((grad.norm(p=2, dim=1) -1)**2).mean()
+    grad_penalty = ((grad.norm(p=2, dim=1) -1)**2)
     return grad_penalty
 
 
@@ -34,8 +34,8 @@ def init_model(imsize, noise_dim, start_channel_dim, image_channels):
     discriminator = Discriminator(image_channels, imsize, start_channel_dim)
     generator = Generator(noise_dim, start_channel_dim, image_channels)
     to_cuda([discriminator, generator])
-    discriminator.apply(init_weights)
-    generator.apply(init_weights)
+    #discriminator.apply(init_weights)
+    #generator.apply(init_weights)
     discriminator.summary()
     generator.summary()
     return discriminator, generator
@@ -47,15 +47,19 @@ def generate_noise(batch_size, noise_dim):
     return z
 
 
+def adjust_dynamic_range(data):
+    return data*2-1
+
 def save_images(writer, images, global_step, directory):
     imsize = images.shape[2]
-    filename = "step{0}_{1}x{1}.jpg".format(global_step, imsize)
+    filename = "fakes{0}_{1}x{1}.jpg".format(global_step, imsize)
     filepath = os.path.join(directory, filename)
     torchvision.utils.save_image(images, filepath, nrow=10)
     image_grid = torchvision.utils.make_grid(images, normalize=True, nrow=10)
     writer.add_image("Image", image_grid, global_step)
 
 def normalize_img(image):
+    return (image+1)/2
     if image.shape[1] == 3:
         image[:, 0, :, :] = image[:, 0, :, :] * 0.2023 + 0.4914
         image[:, 1, :, :] = image[:, 1, :, :] * 0.1994 + 0.4822
@@ -71,6 +75,32 @@ def load_dataset(dataset, batch_size, imsize):
         return load_mnist(batch_size, imsize)
     if dataset == "cifar10":
         return load_cifar10(batch_size, imsize)
+
+
+
+def preprocess_images(images, transition_variable):
+    images = Variable(images)
+    images = to_cuda(images)
+    images = adjust_dynamic_range(images)
+    # Compute averaged image
+    s = images.shape
+    y = images.view([-1, s[1], s[2]//2, 2, s[3]//2, 2])
+    y = y.mean(dim=3, keepdim=True).mean(dim=5, keepdim=True)
+    y = y.repeat([1, 1, 1, 2, 1, 2])
+    y = y.view(-1, s[1], s[2], s[3])
+    
+    images = get_transition_value(y, images, transition_variable)
+
+    return images
+
+def log_model_graphs(summaries_dir, generator, discriminator):
+
+    with tensorboardX.SummaryWriter(summaries_dir + "_generator") as w:
+        dummy_input = to_cuda(torch.zeros((1, generator.noise_dim, 1, 1)))
+        w.add_graph(generator, input_to_model=dummy_input)
+    with tensorboardX.SummaryWriter(summaries_dir + "_discriminator") as w:
+        dummy_input = to_cuda(torch.zeros((1, discriminator.image_channels, discriminator.current_input_imsize, discriminator.current_input_imsize)))
+        w.add_graph(discriminator, input_to_model=dummy_input)
 
 
 def main(options):
@@ -92,87 +122,90 @@ def main(options):
     except:
         print(' [*] No checkpoint!')
         start_epoch = 0
-
+    
 
     """ run """
     current_imsize = options.imsize
     current_channels = options.start_channel_size // 2
     writer = tensorboardX.SummaryWriter(options.summaries_dir)
-    transition_variable = 1
-    transition_iters = 10000
+
+    transition_variable = 1.
+    transition_iters = 600000 // options.batch_size * options.batch_size
     transition_step = 0
     z_sample = generate_noise(100, options.noise_dim)
+    log_model_graphs(options.summaries_dir, generator, discriminator)
     is_transitioning = False
     global_step = 0
+    start_time = time.time()
     for epoch in range(start_epoch, options.num_epochs):
         for i, (real_data, _) in tqdm.tqdm(enumerate(data_loader), 
                                            total=len(data_loader),
                                            desc="Global step: {:10.0f}".format(global_step)):
-
+            batch_start_time = time.time()
             generator.train()
-            global_step += 1
+            global_step += 1 * options.batch_size
             if is_transitioning:
                 transition_variable = ((global_step-1) % transition_iters) / transition_iters
-            real_data = Variable(real_data)
-            real_data = to_cuda(real_data)
+            #print(real_data.min(), real_data.max(), real_data.mean())
+            real_data = preprocess_images(real_data, transition_variable)
+            #print(real_data.min(), real_data.max(), real_data.mean())
             z = generate_noise(real_data.shape[0], options.noise_dim)
 
+            # Forward G
             fake_data = generator(z, transition_variable)
 
             # Train Discriminator
             real_logits = discriminator(real_data, transition_variable)
             fake_logits = discriminator(fake_data.detach(), transition_variable)
             
-            wasserstein_distance = real_logits.mean() - fake_logits.mean()  # Wasserstein-1 Distance
+            wasserstein_distance = (real_logits - fake_logits).squeeze()  # Wasserstein-1 Distance
             gradient_pen = gradient_penalty(real_data.data, fake_data.data, discriminator)
-            D_loss = -wasserstein_distance + gradient_pen * 10.0
-
+            # Epsilon penalty
+            epsilon_penalty = real_logits ** 2
+            D_loss = -wasserstein_distance + gradient_pen * 10 + epsilon_penalty * 0.001
+            
+            D_loss = D_loss.mean()
             discriminator.zero_grad()
             D_loss.backward()
             d_optimizer.step()
 
+
+            # Forward G
+            fake_logits = discriminator(fake_data, transition_variable)
+            G_loss = -fake_logits.mean()
+            discriminator.zero_grad()
+            generator.zero_grad()
+            G_loss.backward()
+            g_optimizer.step()
+
+
+            nsec_per_img = (time.time() - batch_start_time) / options.batch_size
+            total_time = (time.time() - start_time) / 60
             # Log data
-            writer.add_scalar('discriminator/wasserstein-distance', wasserstein_distance.item(), global_step=global_step)
-            writer.add_scalar('discriminator/gradient-penalty', gradient_pen.item(), global_step=global_step)
+            writer.add_scalar('discriminator/wasserstein-distance', wasserstein_distance.mean().item(), global_step=global_step)
+            writer.add_scalar('discriminator/gradient-penalty', gradient_pen.mean().item(), global_step=global_step)
+            writer.add_scalar("discriminator/real-score", real_logits.mean().item(), global_step=global_step)
+            writer.add_scalar("discriminator/fake-score", fake_logits.mean().item(), global_step=global_step)
+            writer.add_scalar("discriminator/epsilon-penalty", epsilon_penalty.mean().item(), global_step=global_step)
+            writer.add_scalar("transition-value", transition_variable, global_step=global_step)
+            writer.add_scalar("nsec_per_img", nsec_per_img, global_step=global_step)
+            writer.add_scalar("training_time_minutes", total_time, global_step=global_step)
 
-            if global_step % options.n_critic == 0:
-                # Train Generator
-                z = generate_noise(real_data.shape[0], options.noise_dim)
-                fake_data = generator(z, transition_variable)
-                fake_logits = discriminator(fake_data, transition_variable)
-                G_loss = -fake_logits.mean()
-                writer.add_scalars("generator/fadein-constant", {
-                    "fadin constant": transition_variable},
-                    global_step=global_step
-                )
-                discriminator.zero_grad()
-                generator.zero_grad()
-                G_loss.backward()
-                g_optimizer.step()
 
-                writer.add_scalars('generator',
-                                {"loss": G_loss.item()},
-                                global_step=global_step)
-                total_loss = D_loss + G_loss
 
-                writer.add_scalars('total',
-                                  {'loss': total_loss.item()},
-                                  global_step=global_step)
-
-            if (global_step+1) % 100 == 0:
+            if (global_step) % (options.batch_size*100) == 0:
                 generator.eval()
                 fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
                 #print(fake_data_sample.max(), fake_data_sample.min())
                 save_images(writer, fake_data_sample, global_step, options.generated_data_dir)
 
                 # Save input images
-                os.makedirs("input_images", exist_ok=True)
                 imsize = real_data.shape[2]
-                filename = "step{0}_{1}x{1}.jpg".format(global_step, imsize)
-                filepath = os.path.join("input_images", filename)
-                #writer.add_image("Image", image_grid, global_step)
-                torchvision.utils.save_image(normalize_img(real_data[:100]), filepath, nrow=10)
-
+                filename = "reals{0}_{1}x{1}.jpg".format(global_step, imsize)
+                filepath = os.path.join(options.generated_data_dir, filename)
+                to_save = normalize_img(real_data[:100])
+                torchvision.utils.save_image(to_save, filepath, nrow=10)
+                
             
             if global_step % transition_iters == 0:
                 #print("TRANSITION SWITCH")
@@ -198,7 +231,7 @@ def main(options):
                     os.makedirs("lol", exist_ok=True)
                     filepath = os.path.join("lol", "test.jpg")
                     torchvision.utils.save_image(fake_data_sample[:100], filepath, nrow=10)
-                    #save_images(writer, fake_data_sample, global_step, options.generated_data_dir)
+                    log_model_graphs(options.summaries_dir, generator, discriminator)
 
 
                     break
