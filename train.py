@@ -12,14 +12,14 @@ from dataloaders import load_mnist, load_cifar10, load_pokemon, load_celeba
 from options import load_options
 import time
 
-def gradient_penalty(real_data, fake_data, discriminator):
+def gradient_penalty(real_data, fake_data, discriminator, transition_variable):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() -1)
     epsilon = torch.rand(epsilon_shape)
     epsilon = to_cuda(epsilon)
     x_hat = epsilon * real_data + (1-epsilon) * fake_data.detach()
     x_hat = to_cuda(Variable(x_hat, requires_grad=True))
 
-    logits, _ = discriminator(x_hat)
+    logits, _ = discriminator(x_hat, transition_variable)
     grad = torch.autograd.grad(
         outputs=logits,
         inputs=x_hat,
@@ -29,10 +29,29 @@ def gradient_penalty(real_data, fake_data, discriminator):
     grad_penalty = ((grad.norm(p=2, dim=1) - 1)**2)
     return grad_penalty
 
+class DataParallellWrapper(torch.nn.Module):
+    
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self.forward_block = torch.nn.DataParallel(self.model)
+
+    def forward(self, x, transition_variable):
+        return self.forward_block(x)
+    
+    def extend(self, channel_size):
+        self.model.extend(channel_size)
+        self.forward_block = torch.nn.DataParallel(self.model)
+    
+    def summary(self):
+        self.model.summary()
+
 
 def init_model(imsize, noise_dim, start_channel_dim, image_channels, label_size):
     discriminator = Discriminator(image_channels, imsize, start_channel_dim, label_size)
+    discriminator = DataParallellWrapper(discriminator)
     generator = Generator(noise_dim, start_channel_dim, image_channels)
+    generator = DataParallellWrapper(generator)
     to_cuda([discriminator, generator])
     #discriminator.apply(init_weights)
     #generator.apply(init_weights)
@@ -106,11 +125,11 @@ def preprocess_images(images, transition_variable):
 def log_model_graphs(summaries_dir, generator, discriminator):
 
     with tensorboardX.SummaryWriter(summaries_dir + "_generator") as w:
-        dummy_input = to_cuda(torch.zeros((1, generator.noise_dim, 1, 1)))
-        w.add_graph(generator, input_to_model=dummy_input)
+        dummy_input = to_cuda(torch.zeros((1, generator.model.noise_dim, 1, 1)))
+        w.add_graph(generator.model, input_to_model=dummy_input)
     with tensorboardX.SummaryWriter(summaries_dir + "_discriminator") as w:
-        dummy_input = to_cuda(torch.zeros((1, discriminator.image_channels, discriminator.current_input_imsize, discriminator.current_input_imsize)))
-        w.add_graph(discriminator, input_to_model=dummy_input)
+        dummy_input = to_cuda(torch.zeros((1, discriminator.model.image_channels, discriminator.model.current_input_imsize, discriminator.model.current_input_imsize)))
+        w.add_graph(discriminator.model, input_to_model=dummy_input)
 
 
 def main(options):
@@ -180,7 +199,7 @@ def main(options):
             real_scores, real_logits = discriminator(real_data, transition_variable)
             fake_scores, fake_logits = discriminator(fake_data.detach(), transition_variable)
             wasserstein_distance = (real_scores - fake_scores).squeeze()  # Wasserstein-1 Distance
-            gradient_pen = gradient_penalty(real_data.data, fake_data.data, discriminator)
+            gradient_pen = gradient_penalty(real_data.data, fake_data.data, discriminator, transition_variable)
             # Epsilon penalty
             epsilon_penalty = (real_scores ** 2).squeeze()
 
