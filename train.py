@@ -8,7 +8,7 @@ from models import Generator, Discriminator, get_transition_value
 import tqdm
 from torchsummary import summary
 import os
-from dataloaders import load_mnist, load_cifar10, load_pokemon
+from dataloaders import load_mnist, load_cifar10, load_pokemon, load_celeba
 from options import load_options
 import time
 
@@ -16,22 +16,22 @@ def gradient_penalty(real_data, fake_data, discriminator):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() -1)
     epsilon = torch.rand(epsilon_shape)
     epsilon = to_cuda(epsilon)
-    x_hat = epsilon * real_data + (1-epsilon) * fake_data
+    x_hat = epsilon * real_data + (1-epsilon) * fake_data.detach()
     x_hat = to_cuda(Variable(x_hat, requires_grad=True))
 
-    logits = discriminator(x_hat)
+    logits, _ = discriminator(x_hat)
     grad = torch.autograd.grad(
         outputs=logits,
         inputs=x_hat,
         grad_outputs=to_cuda(torch.ones(logits.shape)),
         create_graph=True
     )[0].view(x_hat.shape[0], -1)
-    grad_penalty = ((grad.norm(p=2, dim=1) -1)**2)
+    grad_penalty = ((grad.norm(p=2, dim=1) - 1)**2)
     return grad_penalty
 
 
-def init_model(imsize, noise_dim, start_channel_dim, image_channels):
-    discriminator = Discriminator(image_channels, imsize, start_channel_dim)
+def init_model(imsize, noise_dim, start_channel_dim, image_channels, label_size):
+    discriminator = Discriminator(image_channels, imsize, start_channel_dim, label_size)
     generator = Generator(noise_dim, start_channel_dim, image_channels)
     to_cuda([discriminator, generator])
     #discriminator.apply(init_weights)
@@ -41,8 +41,16 @@ def init_model(imsize, noise_dim, start_channel_dim, image_channels):
     return discriminator, generator
 
 
-def generate_noise(batch_size, noise_dim):
+def generate_noise(batch_size, noise_dim, labels, label_size):
     z = Variable(torch.randn(batch_size, noise_dim))
+    if label_size > 0:
+        assert labels.shape[0] == batch_size, "Label size: {}, batch size: {}".format(labels.shape, batch_size)
+        labels_onehot = torch.zeros((batch_size, label_size))
+        idx = range(batch_size)
+        labels_onehot[idx, labels.long().squeeze()] = 1
+        assert labels_onehot.sum() == batch_size, "Was : {} expected:{}".format(labels_onehot.sum(), batch_size) 
+        
+        z[:, :label_size] = labels_onehot
     z = to_cuda(z)
     return z
 
@@ -75,6 +83,8 @@ def load_dataset(dataset, batch_size, imsize):
         return load_mnist(batch_size, imsize)
     if dataset == "cifar10":
         return load_cifar10(batch_size, imsize)
+    if dataset == "celeba":
+        return load_celeba(batch_size, imsize)
 
 
 
@@ -105,8 +115,11 @@ def log_model_graphs(summaries_dir, generator, discriminator):
 
 def main(options):
     data_loader = load_dataset(options.dataset, options.batch_size, options.imsize)
-    
-    discriminator, generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels)
+    if options.dataset == "celeba":
+        label_size = 0
+    else:
+        label_size = 10
+    discriminator, generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels, label_size)
     d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999))
     g_optimizer = torch.optim.Adam(generator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999))
     
@@ -123,8 +136,12 @@ def main(options):
         print(' [*] No checkpoint!')
         start_epoch = 0
     
+    # Print Image stats
+    real_data = next(iter(data_loader))[0]
+    print("Input images:", real_data.max(), real_data.min())
 
     """ run """
+
     current_imsize = options.imsize
     current_channels = options.start_channel_size // 2
     writer = tensorboardX.SummaryWriter(options.summaries_dir)
@@ -132,38 +149,52 @@ def main(options):
     transition_variable = 1.
     transition_iters = 600000 // options.batch_size * options.batch_size
     transition_step = 0
-    z_sample = generate_noise(100, options.noise_dim)
+    
+    labels = torch.arange(0, label_size).repeat(100 // label_size)[:100].view(-1, 1) if label_size > 0 else None
+
+    z_sample = generate_noise(100, options.noise_dim, labels, label_size)
     log_model_graphs(options.summaries_dir, generator, discriminator)
     is_transitioning = False
     global_step = 0
     start_time = time.time()
+    label_criterion = torch.nn.CrossEntropyLoss(reduction='none')
     for epoch in range(start_epoch, options.num_epochs):
-        for i, (real_data, _) in tqdm.tqdm(enumerate(data_loader), 
+        for i, (real_data, labels) in tqdm.tqdm(enumerate(data_loader), 
                                            total=len(data_loader),
                                            desc="Global step: {:10.0f}".format(global_step)):
             batch_start_time = time.time()
             generator.train()
+            labels = to_cuda(Variable(labels))
             global_step += 1 * options.batch_size
             if is_transitioning:
                 transition_variable = ((global_step-1) % transition_iters) / transition_iters
             #print(real_data.min(), real_data.max(), real_data.mean())
             real_data = preprocess_images(real_data, transition_variable)
             #print(real_data.min(), real_data.max(), real_data.mean())
-            z = generate_noise(real_data.shape[0], options.noise_dim)
+            z = generate_noise(real_data.shape[0], options.noise_dim, labels, label_size)
 
             # Forward G
             fake_data = generator(z, transition_variable)
 
             # Train Discriminator
-            real_logits = discriminator(real_data, transition_variable)
-            fake_logits = discriminator(fake_data.detach(), transition_variable)
-            
-            wasserstein_distance = (real_logits - fake_logits).squeeze()  # Wasserstein-1 Distance
+            real_scores, real_logits = discriminator(real_data, transition_variable)
+            fake_scores, fake_logits = discriminator(fake_data.detach(), transition_variable)
+            wasserstein_distance = (real_scores - fake_scores).squeeze()  # Wasserstein-1 Distance
             gradient_pen = gradient_penalty(real_data.data, fake_data.data, discriminator)
             # Epsilon penalty
-            epsilon_penalty = real_logits ** 2
-            D_loss = -wasserstein_distance + gradient_pen * 10 + epsilon_penalty * 0.001
-            
+            epsilon_penalty = (real_scores ** 2).squeeze()
+
+            # Label loss penalty
+            label_penalty_discriminator = to_cuda(torch.Tensor([0]))
+            if label_size > 0:
+                label_penalty_reals = label_criterion(real_logits, labels)
+                label_penalty_fakes = label_criterion(fake_logits, labels)
+                label_penalty_discriminator = (label_penalty_reals + label_penalty_fakes).squeeze()
+            assert wasserstein_distance.shape == gradient_pen.shape
+            assert wasserstein_distance.shape == epsilon_penalty.shape
+            D_loss = -wasserstein_distance + gradient_pen * 10 + epsilon_penalty * 0.001 + label_penalty_discriminator
+
+
             D_loss = D_loss.mean()
             discriminator.zero_grad()
             D_loss.backward()
@@ -171,8 +202,14 @@ def main(options):
 
 
             # Forward G
-            fake_logits = discriminator(fake_data, transition_variable)
-            G_loss = -fake_logits.mean()
+            fake_scores, fake_logits = discriminator(fake_data, transition_variable)
+            
+            # Label loss penalty
+            label_penalty_generator = label_criterion(fake_logits, labels).squeeze() if label_size > 0 else to_cuda(torch.Tensor([0]))
+    
+            
+            G_loss = (-fake_scores + label_penalty_generator).mean()
+            #G_loss = (-fake_scores).mean()
             discriminator.zero_grad()
             generator.zero_grad()
             G_loss.backward()
@@ -184,13 +221,14 @@ def main(options):
             # Log data
             writer.add_scalar('discriminator/wasserstein-distance', wasserstein_distance.mean().item(), global_step=global_step)
             writer.add_scalar('discriminator/gradient-penalty', gradient_pen.mean().item(), global_step=global_step)
-            writer.add_scalar("discriminator/real-score", real_logits.mean().item(), global_step=global_step)
-            writer.add_scalar("discriminator/fake-score", fake_logits.mean().item(), global_step=global_step)
+            writer.add_scalar("discriminator/real-score", real_scores.mean().item(), global_step=global_step)
+            writer.add_scalar("discriminator/fake-score", fake_scores.mean().item(), global_step=global_step)
             writer.add_scalar("discriminator/epsilon-penalty", epsilon_penalty.mean().item(), global_step=global_step)
-            writer.add_scalar("transition-value", transition_variable, global_step=global_step)
-            writer.add_scalar("nsec_per_img", nsec_per_img, global_step=global_step)
-            writer.add_scalar("training_time_minutes", total_time, global_step=global_step)
-
+            writer.add_scalar("stats/transition-value", transition_variable, global_step=global_step)
+            writer.add_scalar("stats/nsec_per_img", nsec_per_img, global_step=global_step)
+            writer.add_scalar("stats/training_time_minutes", total_time, global_step=global_step)
+            writer.add_scalar("discriminator/label-penalty", label_penalty_discriminator.mean(), global_step=global_step)
+            writer.add_scalar("generator/label-penalty", label_penalty_generator.mean(), global_step=global_step)
 
 
             if (global_step) % (options.batch_size*100) == 0:
