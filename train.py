@@ -163,6 +163,9 @@ class Trainer:
         self.g_optimizer = torch.optim.Adam(self.generator.parameters(),
                                             lr=self.learning_rate, betas=(0.0, 0.999))
 
+    def log_variable(self, name, value):
+        self.writer.add_scalar(name, value, global_step=self.global_step)
+
     def __init__(self, options):
 
         # Set Hyperparameters
@@ -175,7 +178,7 @@ class Trainer:
 
         # Image settings
         self.current_imsize = options.imsize
-        self.current_channels = options.start_channel_size // 2
+        self.current_channels = options.start_channel_size
         self.max_imsize = options.max_imsize
 
         # Logging variables
@@ -187,6 +190,18 @@ class Trainer:
         self.transition_variable = 1.
         self.transition_iters = 6e5 // options.batch_size * options.batch_size
         self.is_transitioning = False
+        self.transition_step = 0
+        self.transition_channels = [
+            self.current_channels,
+            self.current_channels,
+            self.current_channels,
+            self.current_channels//2,
+            self.current_channels//4,
+            self.current_channels//8,
+            self.current_channels//16,
+            self.current_channels//32,                                                            
+            
+            ]
 
         self.start_time = time.time()
 
@@ -274,16 +289,16 @@ class Trainer:
                 nsec_per_img = (time.time() - batch_start_time) / self.batch_size
                 total_time = (time.time() - self.start_time) / 60
                 # Log data
-                self.writer.add_scalar('discriminator/wasserstein-distance', wasserstein_distance.mean().item(), global_step=self.global_step)
-                self.writer.add_scalar('discriminator/gradient-penalty', gradient_pen.mean().item(), global_step=self.global_step)
-                self.writer.add_scalar("discriminator/real-score", real_scores.mean().item(), global_step=self.global_step)
-                self.writer.add_scalar("discriminator/fake-score", fake_scores.mean().item(), global_step=self.global_step)
-                self.writer.add_scalar("discriminator/epsilon-penalty", epsilon_penalty.mean().item(), global_step=self.global_step)
-                self.writer.add_scalar("stats/transition-value", self.transition_variable, global_step=self.global_step)
-                self.writer.add_scalar("stats/nsec_per_img", nsec_per_img, global_step=self.global_step)
-                self.writer.add_scalar("stats/training_time_minutes", total_time, global_step=self.global_step)
-                self.writer.add_scalar("discriminator/label-penalty", label_penalty_discriminator.mean(), global_step=self.global_step)
-                self.writer.add_scalar("generator/label-penalty", label_penalty_generator.mean(), global_step=self.global_step)
+                self.log_variable('discriminator/wasserstein-distance', wasserstein_distance.mean().item())
+                self.log_variable('discriminator/gradient-penalty', gradient_pen.mean().item())
+                self.log_variable("discriminator/real-score", real_scores.mean().item())
+                self.log_variable("discriminator/fake-score", fake_scores.mean().item())
+                self.log_variable("discriminator/epsilon-penalty", epsilon_penalty.mean().item())
+                self.log_variable("stats/transition-value", self.transition_variable)
+                self.log_variable("stats/nsec_per_img", nsec_per_img)
+                self.log_variable("stats/training_time_minutes", total_time)
+                self.log_variable("discriminator/label-penalty", label_penalty_discriminator.mean())
+                self.log_variable("generator/label-penalty", label_penalty_generator.mean())
 
 
                 if (self.global_step) % (self.batch_size*100) == 0:
@@ -303,13 +318,15 @@ class Trainer:
 
                     if self.global_step % (self.transition_iters*2) == 0:
                         # Stop transitioning
-                        is_transitioning = False
+                        self.is_transitioning = False
                         self.transition_variable = 1.0
                     elif self.current_imsize < self.max_imsize:
+                        self.current_channels = self.transition_channels[self.transition_step]
                         self.discriminator.extend(self.current_channels)
                         self.generator.extend(self.current_channels)
                         self.current_imsize *= 2
-                        self.current_channels = self.current_channels // 2
+
+                        
                         self.discriminator.summary(), self.generator.summary()
                         self.data_loader = load_dataset(self.dataset, self.batch_size, self.current_imsize)
                         self.is_transitioning = True
@@ -322,7 +339,7 @@ class Trainer:
                         filepath = os.path.join("lol", "test.jpg")
                         torchvision.utils.save_image(fake_data_sample[:100], filepath, nrow=10)
                         self.log_model_graphs()
-
+                        self.transition_step += 1
 
                         break
 
