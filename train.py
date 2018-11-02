@@ -62,18 +62,7 @@ def init_model(imsize, noise_dim, start_channel_dim, image_channels, label_size)
     return discriminator, generator
 
 
-def generate_noise(batch_size, noise_dim, labels, label_size):
-    z = Variable(torch.randn(batch_size, noise_dim))
-    if label_size > 0:
-        assert labels.shape[0] == batch_size, "Label size: {}, batch size: {}".format(labels.shape, batch_size)
-        labels_onehot = torch.zeros((batch_size, label_size))
-        idx = range(batch_size)
-        labels_onehot[idx, labels.long().squeeze()] = 1
-        assert labels_onehot.sum() == batch_size, "Was : {} expected:{}".format(labels_onehot.sum(), batch_size) 
-        
-        z[:, :label_size] = labels_onehot
-    z = to_cuda(z)
-    return z
+
 
 
 def adjust_dynamic_range(data):
@@ -124,186 +113,233 @@ def preprocess_images(images, transition_variable):
 
     return images
 
-def log_model_graphs(summaries_dir, generator, discriminator):
-
-    with tensorboardX.SummaryWriter(summaries_dir + "_generator") as w:
-        dummy_input = to_cuda(torch.zeros((1, generator.model.noise_dim, 1, 1)))
-        w.add_graph(generator.model, input_to_model=dummy_input)
-    with tensorboardX.SummaryWriter(summaries_dir + "_discriminator") as w:
-        dummy_input = to_cuda(torch.zeros((1, discriminator.model.image_channels, discriminator.model.current_input_imsize, discriminator.model.current_input_imsize)))
-        w.add_graph(discriminator.model, input_to_model=dummy_input)
 
 
-def main(options):
-    data_loader = load_dataset(options.dataset, options.batch_size, options.imsize)
+class Trainer:
 
-    discriminator, generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels, options.label_size)
-    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999))
-    g_optimizer = torch.optim.Adam(generator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999))
+    def load_checkpoint(self, checkpoint_dir):
+        try:
+            ckpt = load_checkpoint(options.checkpoint_dir)
+            self.start_epoch = ckpt['epoch']
+            self.discriminator.load_state_dict(ckpt['discriminator'])
+            self.generator.load_state_dict(ckpt['generator'])
+            self.d_optimizer.load_state_dict(ckpt['d_optimizer'])
+            self.g_optimizer.load_state_dict(ckpt['g_optimizer'])
+        except:
+            print(' [*] No checkpoint!')
+            self.start_epoch = 0
+        self.global_step = 0
     
-    """ load checkpoint """
-
-    try:
-        ckpt = load_checkpoint(options.checkpoint_dir)
-        start_epoch = ckpt['epoch']
-        discriminator.load_state_dict(ckpt['discriminator'])
-        generator.load_state_dict(ckpt['generator'])
-        d_optimizer.load_state_dict(ckpt['d_optimizer'])
-        g_optimizer.load_state_dict(ckpt['g_optimizer'])
-    except:
-        print(' [*] No checkpoint!')
-        start_epoch = 0
-    
-    # Print Image stats
-    real_data = next(iter(data_loader))[0]
-    print("Input images:", real_data.max(), real_data.min())
-
-    """ run """
-
-    current_imsize = options.imsize
-    current_channels = options.start_channel_size // 2
-    writer = tensorboardX.SummaryWriter(options.summaries_dir)
-
-    transition_variable = 1.
-    transition_iters = 600000 // options.batch_size * options.batch_size
-    transition_step = 0
-    
-    labels = torch.arange(0, options.label_size).repeat(100 // options.label_size)[:100].view(-1, 1) if options.label_size > 0 else None
-    z_sample = generate_noise(100, options.noise_dim, labels, options.label_size)
-
-    log_model_graphs(options.summaries_dir, generator, discriminator)
-    is_transitioning = False
-    global_step = 0
-    start_time = time.time()
-    label_criterion = torch.nn.CrossEntropyLoss(reduction='none')
-    for epoch in range(start_epoch, options.num_epochs):
-        for i, (real_data, labels) in tqdm.tqdm(enumerate(data_loader), 
-                                           total=len(data_loader),
-                                           desc="Global step: {:10.0f}".format(global_step)):
-            batch_start_time = time.time()
-            generator.train()
-            labels = to_cuda(Variable(labels))
-            global_step += 1 * options.batch_size
-            if is_transitioning:
-                transition_variable = ((global_step-1) % transition_iters) / transition_iters
-            #print(real_data.min(), real_data.max(), real_data.mean())
-            real_data = preprocess_images(real_data, transition_variable)
-            #print(real_data.min(), real_data.max(), real_data.mean())
-            z = generate_noise(real_data.shape[0], options.noise_dim, labels, options.label_size)
-
-            # Forward G
-            fake_data = generator(z, transition_variable)
-
-            # Train Discriminator
-            real_scores, real_logits = discriminator(real_data, transition_variable)
-            fake_scores, fake_logits = discriminator(fake_data.detach(), transition_variable)
-            wasserstein_distance = (real_scores - fake_scores).squeeze()  # Wasserstein-1 Distance
-            gradient_pen = gradient_penalty(real_data.data, fake_data.data, discriminator, transition_variable)
-            # Epsilon penalty
-            epsilon_penalty = (real_scores ** 2).squeeze()
-
-            # Label loss penalty
-            label_penalty_discriminator = to_cuda(torch.Tensor([0]))
-            if options.label_size > 0:
-                label_penalty_reals = label_criterion(real_logits, labels)
-                label_penalty_fakes = label_criterion(fake_logits, labels)
-                label_penalty_discriminator = (label_penalty_reals + label_penalty_fakes).squeeze()
-            assert wasserstein_distance.shape == gradient_pen.shape
-            assert wasserstein_distance.shape == epsilon_penalty.shape
-            D_loss = -wasserstein_distance + gradient_pen * 10 + epsilon_penalty * 0.001 + label_penalty_discriminator
-
-
-            D_loss = D_loss.mean()
-            discriminator.zero_grad()
-            D_loss.backward()
-            d_optimizer.step()
-
-
-            # Forward G
-            fake_scores, fake_logits = discriminator(fake_data, transition_variable)
+    def generate_noise(self, batch_size, labels):
+        z = Variable(torch.randn(batch_size, self.noise_dim))
+        if self.label_size > 0:
+            assert labels.shape[0] == batch_size, "Label size: {}, batch size: {}".format(labels.shape, batch_size)
+            labels_onehot = torch.zeros((batch_size, self.label_size))
+            idx = range(batch_size)
+            labels_onehot[idx, labels.long().squeeze()] = 1
+            assert labels_onehot.sum() == batch_size, "Was : {} expected:{}".format(labels_onehot.sum(), batch_size) 
             
-            # Label loss penalty
-            label_penalty_generator = label_criterion(fake_logits, labels).squeeze() if options.label_size > 0 else to_cuda(torch.Tensor([0]))
+            z[:, :self.label_size] = labels_onehot
+        z = to_cuda(z)
+        return z
+
+
+    def log_model_graphs(self):
+        with tensorboardX.SummaryWriter(self.summaries_dir + "_generator") as w:
+            dummy_input = to_cuda(torch.zeros((1, self.generator.model.noise_dim, 1, 1)))
+            w.add_graph(self.generator.model, input_to_model=dummy_input)
+        with tensorboardX.SummaryWriter(self.summaries_dir + "_discriminator") as w:
+            imsize= self.discriminator.model.current_input_imsize
+            image_channels = self.discriminator.model.image_channels
+            dummy_input = to_cuda(torch.zeros((1, 
+                                               image_channels,
+                                               imsize,
+                                               imsize)))
+            w.add_graph(self.discriminator.model, input_to_model=dummy_input)
+
+    def init_optimizers(self):
+        self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(), 
+                                            lr=self.learning_rate, betas=(0.0, 0.999))
+        self.g_optimizer = torch.optim.Adam(self.generator.parameters(),
+                                            lr=self.learning_rate, betas=(0.0, 0.999))
+
+    def __init__(self, options):
+
+        # Set Hyperparameters
+        self.batch_size = options.batch_size
+        self.dataset = options.dataset
+        self.num_epochs = options.num_epochs
+        self.label_size = options.label_size
+        self.noise_dim = options.noise_dim
+        self.learning_rate = options.learning_rate
+
+        # Image settings
+        self.current_imsize = options.imsize
+        self.current_channels = options.start_channel_size // 2
+        self.max_imsize = options.max_imsize
+
+        # Logging variables
+        self.generated_data_dir = options.generated_data_dir
+        self.checkpoint_dir = options.checkpoint_dir
+        self.summaries_dir = options.summaries_dir
+        
+        # Transition settings
+        self.transition_variable = 1.
+        self.transition_iters = 6e5 // options.batch_size * options.batch_size
+        self.is_transitioning = False
+
+        self.start_time = time.time()
+
+
+        self.data_loader = load_dataset(self.dataset, self.batch_size, options.imsize)
+
+        self.discriminator, self.generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels, options.label_size)
+        self.init_optimizers()
+        
+        
+        """ load checkpoint """
+        self.load_checkpoint(self.checkpoint_dir)
+        self.writer = tensorboardX.SummaryWriter(options.summaries_dir)
+
+        
+        labels = torch.arange(0, options.label_size).repeat(100 // options.label_size)[:100].view(-1, 1) if options.label_size > 0 else None
+        self.z_sample = self.generate_noise(100, labels)
+
+        self.log_model_graphs()
+        
+        
+
+        self.label_criterion = torch.nn.CrossEntropyLoss(reduction='none')
+
     
-            
-            G_loss = (-fake_scores + label_penalty_generator).mean()
-            #G_loss = (-fake_scores).mean()
-            discriminator.zero_grad()
-            generator.zero_grad()
-            G_loss.backward()
-            g_optimizer.step()
+    def train(self):
+
+        for epoch in range(self.start_epoch, self.num_epochs):
+            for i, (real_data, labels) in tqdm.tqdm(enumerate(self.data_loader), 
+                                            total=len(self.data_loader),
+                                            desc="Global step: {:10.0f}".format(self.global_step)):
+                batch_start_time = time.time()
+                self.generator.train()
+                labels = to_cuda(Variable(labels))
+                self.global_step += 1 * self.batch_size
+                if self.is_transitioning:
+                    self.transition_variable = ((self.global_step-1) % self.transition_iters) / self.transition_iters
+                real_data = preprocess_images(real_data, self.transition_variable)
+                z = self.generate_noise(real_data.shape[0], labels)
+
+                # Forward G
+                fake_data = self.generator(z, self.transition_variable)
+
+                # Train Discriminator
+                real_scores, real_logits = self.discriminator(real_data, self.transition_variable)
+                fake_scores, fake_logits = self.discriminator(fake_data.detach(), self.transition_variable)
+
+                wasserstein_distance = (real_scores - fake_scores).squeeze()  # Wasserstein-1 Distance
+                gradient_pen = gradient_penalty(real_data.data, fake_data.data, self.discriminator, self.transition_variable)
+                # Epsilon penalty
+                epsilon_penalty = (real_scores ** 2).squeeze()
+
+                # Label loss penalty
+                label_penalty_discriminator = to_cuda(torch.Tensor([0]))
+                if self.label_size > 0:
+                    label_penalty_reals = self.label_criterion(real_logits, labels)
+                    label_penalty_fakes = self.label_criterion(fake_logits, labels)
+                    label_penalty_discriminator = (label_penalty_reals + label_penalty_fakes).squeeze()
+                assert wasserstein_distance.shape == gradient_pen.shape
+                assert wasserstein_distance.shape == epsilon_penalty.shape
+                D_loss = -wasserstein_distance + gradient_pen * 10 + epsilon_penalty * 0.001 + label_penalty_discriminator
 
 
-            nsec_per_img = (time.time() - batch_start_time) / options.batch_size
-            total_time = (time.time() - start_time) / 60
-            # Log data
-            writer.add_scalar('discriminator/wasserstein-distance', wasserstein_distance.mean().item(), global_step=global_step)
-            writer.add_scalar('discriminator/gradient-penalty', gradient_pen.mean().item(), global_step=global_step)
-            writer.add_scalar("discriminator/real-score", real_scores.mean().item(), global_step=global_step)
-            writer.add_scalar("discriminator/fake-score", fake_scores.mean().item(), global_step=global_step)
-            writer.add_scalar("discriminator/epsilon-penalty", epsilon_penalty.mean().item(), global_step=global_step)
-            writer.add_scalar("stats/transition-value", transition_variable, global_step=global_step)
-            writer.add_scalar("stats/nsec_per_img", nsec_per_img, global_step=global_step)
-            writer.add_scalar("stats/training_time_minutes", total_time, global_step=global_step)
-            writer.add_scalar("discriminator/label-penalty", label_penalty_discriminator.mean(), global_step=global_step)
-            writer.add_scalar("generator/label-penalty", label_penalty_generator.mean(), global_step=global_step)
+                D_loss = D_loss.mean()
+                self.d_optimizer.zero_grad()
+                D_loss.backward()
+                self.d_optimizer.step()
 
 
-            if (global_step) % (options.batch_size*100) == 0:
-                generator.eval()
-                fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
-                #print(fake_data_sample.max(), fake_data_sample.min())
-                save_images(writer, fake_data_sample, global_step, options.generated_data_dir)
-
-                # Save input images
-                imsize = real_data.shape[2]
-                filename = "reals{0}_{1}x{1}.jpg".format(global_step, imsize)
-                filepath = os.path.join(options.generated_data_dir, filename)
-                to_save = normalize_img(real_data[:100])
-                torchvision.utils.save_image(to_save, filepath, nrow=10)
+                # Forward G
+                fake_scores, fake_logits = self.discriminator(fake_data, self.transition_variable)
                 
-            
-            if global_step % transition_iters == 0:
-                #print("TRANSITION SWITCH")
-
-                if global_step % (transition_iters*2) == 0:
-                    # Stop transitioning
-                    is_transitioning = False
-                    transition_variable = 1.0
-                elif current_imsize < options.max_imsize:
-                    discriminator.extend(current_channels)
-                    generator.extend(current_channels)
-                    transition_step += 1
-                    current_imsize *= 2
-                    current_channels = current_channels // 2
-                    discriminator.summary(), generator.summary()
-                    data_loader = load_dataset(options.dataset, options.batch_size, current_imsize)
-                    is_transitioning = True
-                    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999), weight_decay=0)
-                    g_optimizer = torch.optim.Adam(generator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999), weight_decay=0)
+                # Label loss penalty
+                label_penalty_generator = self.label_criterion(fake_logits, labels).squeeze() if self.label_size > 0 else to_cuda(torch.Tensor([0]))
+        
+                
+                G_loss = (-fake_scores + label_penalty_generator).mean()
+                #G_loss = (-fake_scores).mean()
+                self.d_optimizer.zero_grad()
+                self.g_optimizer.zero_grad()
+                G_loss.backward()
+                self.g_optimizer.step()
 
 
-                    fake_data_sample = normalize_img(generator(z_sample, transition_variable).data)
-                    os.makedirs("lol", exist_ok=True)
-                    filepath = os.path.join("lol", "test.jpg")
-                    torchvision.utils.save_image(fake_data_sample[:100], filepath, nrow=10)
-                    log_model_graphs(options.summaries_dir, generator, discriminator)
+                nsec_per_img = (time.time() - batch_start_time) / self.batch_size
+                total_time = (time.time() - self.start_time) / 60
+                # Log data
+                self.writer.add_scalar('discriminator/wasserstein-distance', wasserstein_distance.mean().item(), global_step=self.global_step)
+                self.writer.add_scalar('discriminator/gradient-penalty', gradient_pen.mean().item(), global_step=self.global_step)
+                self.writer.add_scalar("discriminator/real-score", real_scores.mean().item(), global_step=self.global_step)
+                self.writer.add_scalar("discriminator/fake-score", fake_scores.mean().item(), global_step=self.global_step)
+                self.writer.add_scalar("discriminator/epsilon-penalty", epsilon_penalty.mean().item(), global_step=self.global_step)
+                self.writer.add_scalar("stats/transition-value", self.transition_variable, global_step=self.global_step)
+                self.writer.add_scalar("stats/nsec_per_img", nsec_per_img, global_step=self.global_step)
+                self.writer.add_scalar("stats/training_time_minutes", total_time, global_step=self.global_step)
+                self.writer.add_scalar("discriminator/label-penalty", label_penalty_discriminator.mean(), global_step=self.global_step)
+                self.writer.add_scalar("generator/label-penalty", label_penalty_generator.mean(), global_step=self.global_step)
 
 
-                    break
+                if (self.global_step) % (self.batch_size*100) == 0:
+                    self.generator.eval()
+                    fake_data_sample = normalize_img(self.generator(self.z_sample, self.transition_variable).data)
+                    save_images(self.writer, fake_data_sample, self.global_step, self.generated_data_dir)
+
+                    # Save input images
+                    imsize = real_data.shape[2]
+                    filename = "reals{0}_{1}x{1}.jpg".format(self.global_step, imsize)
+                    filepath = os.path.join(self.generated_data_dir, filename)
+                    to_save = normalize_img(real_data[:100])
+                    torchvision.utils.save_image(to_save, filepath, nrow=10)
+                    
+                
+                if self.global_step % self.transition_iters == 0:
+
+                    if self.global_step % (self.transition_iters*2) == 0:
+                        # Stop transitioning
+                        is_transitioning = False
+                        self.transition_variable = 1.0
+                    elif self.current_imsize < self.max_imsize:
+                        self.discriminator.extend(self.current_channels)
+                        self.generator.extend(self.current_channels)
+                        self.current_imsize *= 2
+                        self.current_channels = self.current_channels // 2
+                        self.discriminator.summary(), self.generator.summary()
+                        self.data_loader = load_dataset(self.dataset, self.batch_size, self.current_imsize)
+                        self.is_transitioning = True
+
+                        self.init_optimizers()
+                        self.transition_variable = 0
+                        
+                        fake_data_sample = normalize_img(self.generator(self.z_sample, self.transition_variable).data)
+                        os.makedirs("lol", exist_ok=True)
+                        filepath = os.path.join("lol", "test.jpg")
+                        torchvision.utils.save_image(fake_data_sample[:100], filepath, nrow=10)
+                        self.log_model_graphs()
+
+
+                        break
 
 
 
-        filename = "Epoch_{}.ckpt".format(epoch)
-        filepath = os.path.join(options.checkpoint_dir, filename)
-        save_checkpoint({'epoch': epoch + 1,
-                            'D': discriminator.state_dict(),
-                            'G': generator.state_dict(),
-                            'd_optimizer': d_optimizer.state_dict(),
-                            'g_optimizer': g_optimizer.state_dict()},
-                            filepath,
-                            max_keep=2)
+            filename = "Epoch_{}.ckpt".format(epoch)
+            filepath = os.path.join(self.checkpoint_dir, filename)
+            save_checkpoint({'epoch': epoch + 1,
+                                'D': self.discriminator.state_dict(),
+                                'G': self.generator.state_dict(),
+                                'd_optimizer': self.d_optimizer.state_dict(),
+                                'g_optimizer': self.g_optimizer.state_dict()},
+                                filepath,
+                                max_keep=2)
 
 if __name__ == '__main__':
     options = load_options()
-    main(options)
+
+    trainer = Trainer(options)
+    trainer.train()
