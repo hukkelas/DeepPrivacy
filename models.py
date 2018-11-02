@@ -71,10 +71,11 @@ class EqualizedConv2D(nn.Module):
         #self.conv.bias.data = self.conv.bias.data.zero_() 
         #self.conv = nn.utils.weight_norm(self.conv)
         self.wscale_layer = WSConv2d(in_dim, out_dim, kernel_size, 1, padding)
-        self.conv = self.wscale_layer.conv
+        #self.conv = self.wscale_layer.conv
+        self.output_dim = out_dim
+        self.input_dim = in_dim
 
     def forward(self, x):
-        #x = self.conv(x)
         x = self.wscale_layer(x)
         return x
 
@@ -130,7 +131,7 @@ class Generator(nn.Module):
     
     def extend(self, output_dim):
         # Find input shape
-        input_dim = self.to_rgb_new.conv.weight.shape[1]
+        input_dim = self.to_rgb_new.input_dim
         new_core_model = nn.Sequential()
         idx = 0
         for module in self.core_model.children():
@@ -206,7 +207,8 @@ class Discriminator(nn.Module):
     def extend(self, input_dim):
         
         self.current_input_imsize *= 2
-        output_dim = list(self.from_rgb_new.parameters())[1].shape[0]
+        output_dim = next(self.from_rgb_new.children()).output_dim
+        #output_dim = list(self.from_rgb_new.parameters())[1].shape[0]
         new_core_model = nn.Sequential()
         idx = 0
         for module in self.new_block.children():
