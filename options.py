@@ -65,10 +65,13 @@ def load_options():
                       help="Set the dataset to load",
                       default=DEFALUT_DATASET)
 
-    
+            
+    options, _ = parser.parse_args()
 
     
-    options, _ = parser.parse_args()
+    options.label_size = 10
+    if options.dataset == "celeba":
+        options.label_size = 0
 
     validate_start_channel_size(options.max_imsize, options.start_channel_size)
 

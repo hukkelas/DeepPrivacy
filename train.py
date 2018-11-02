@@ -136,11 +136,8 @@ def log_model_graphs(summaries_dir, generator, discriminator):
 
 def main(options):
     data_loader = load_dataset(options.dataset, options.batch_size, options.imsize)
-    if options.dataset == "celeba":
-        label_size = 0
-    else:
-        label_size = 10
-    discriminator, generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels, label_size)
+
+    discriminator, generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels, options.label_size)
     d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999))
     g_optimizer = torch.optim.Adam(generator.parameters(), lr=options.learning_rate, betas=(0.0, 0.999))
     
@@ -171,9 +168,9 @@ def main(options):
     transition_iters = 600000 // options.batch_size * options.batch_size
     transition_step = 0
     
-    labels = torch.arange(0, label_size).repeat(100 // label_size)[:100].view(-1, 1) if label_size > 0 else None
+    labels = torch.arange(0, options.label_size).repeat(100 // options.label_size)[:100].view(-1, 1) if options.label_size > 0 else None
+    z_sample = generate_noise(100, options.noise_dim, labels, options.label_size)
 
-    z_sample = generate_noise(100, options.noise_dim, labels, label_size)
     log_model_graphs(options.summaries_dir, generator, discriminator)
     is_transitioning = False
     global_step = 0
@@ -192,7 +189,7 @@ def main(options):
             #print(real_data.min(), real_data.max(), real_data.mean())
             real_data = preprocess_images(real_data, transition_variable)
             #print(real_data.min(), real_data.max(), real_data.mean())
-            z = generate_noise(real_data.shape[0], options.noise_dim, labels, label_size)
+            z = generate_noise(real_data.shape[0], options.noise_dim, labels, options.label_size)
 
             # Forward G
             fake_data = generator(z, transition_variable)
@@ -207,7 +204,7 @@ def main(options):
 
             # Label loss penalty
             label_penalty_discriminator = to_cuda(torch.Tensor([0]))
-            if label_size > 0:
+            if options.label_size > 0:
                 label_penalty_reals = label_criterion(real_logits, labels)
                 label_penalty_fakes = label_criterion(fake_logits, labels)
                 label_penalty_discriminator = (label_penalty_reals + label_penalty_fakes).squeeze()
@@ -226,7 +223,7 @@ def main(options):
             fake_scores, fake_logits = discriminator(fake_data, transition_variable)
             
             # Label loss penalty
-            label_penalty_generator = label_criterion(fake_logits, labels).squeeze() if label_size > 0 else to_cuda(torch.Tensor([0]))
+            label_penalty_generator = label_criterion(fake_logits, labels).squeeze() if options.label_size > 0 else to_cuda(torch.Tensor([0]))
     
             
             G_loss = (-fake_scores + label_penalty_generator).mean()
