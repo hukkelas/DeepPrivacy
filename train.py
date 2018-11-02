@@ -11,6 +11,8 @@ import os
 from dataloaders import load_mnist, load_cifar10, load_pokemon, load_celeba
 from options import load_options
 import time
+torch.backends.cudnn.benchmark=True
+
 
 def gradient_penalty(real_data, fake_data, discriminator, transition_variable):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() -1)
