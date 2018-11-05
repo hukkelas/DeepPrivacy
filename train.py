@@ -39,7 +39,7 @@ class DataParallellWrapper(torch.nn.Module):
         self.forward_block = torch.nn.DataParallel(self.model)
 
     def forward(self, x, transition_variable):
-        return self.forward_block(x)
+        return self.forward_block(x, transition_variable)
     
     def extend(self, channel_size):
         self.model.extend(channel_size)
