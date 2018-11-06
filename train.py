@@ -73,19 +73,12 @@ def save_images(writer, images, global_step, directory):
     filename = "fakes{0}_{1}x{1}.jpg".format(global_step, imsize)
     filepath = os.path.join(directory, filename)
     torchvision.utils.save_image(images, filepath, nrow=10)
-    image_grid = torchvision.utils.make_grid(images, normalize=True, nrow=10)
+    image_grid = torchvision.utils.make_grid(images, nrow=10)
     writer.add_image("Image", image_grid, global_step)
 
 def normalize_img(image):
     return (image+1)/2
-    if image.shape[1] == 3:
-        image[:, 0, :, :] = image[:, 0, :, :] * 0.2023 + 0.4914
-        image[:, 1, :, :] = image[:, 1, :, :] * 0.1994 + 0.4822
-        image[:, 2, :, :] = image[:, 2, :, :] * 0.2010 + 0.4465
-    else:
-        image = image * 0.5 + 0.5
-    
-    return image
+
 
 
 def load_dataset(dataset, batch_size, imsize):
@@ -117,18 +110,144 @@ def preprocess_images(images, transition_variable):
 
 class Trainer:
 
-    def load_checkpoint(self, checkpoint_dir):
+
+    def __init__(self, options):
+
+        # Set Hyperparameters
+        self.batch_size = options.batch_size
+        self.dataset = options.dataset
+        self.num_epochs = options.num_epochs
+        self.label_size = options.label_size
+        self.noise_dim = options.noise_dim
+        self.learning_rate = options.learning_rate
+
+        # Image settings
+        self.current_imsize = options.imsize
+        self.image_channels = options.image_channels
+        self.max_imsize = options.max_imsize
+
+        # Logging variables
+        self.generated_data_dir = options.generated_data_dir
+        self.checkpoint_dir = options.checkpoint_dir
+        self.summaries_dir = options.summaries_dir
+        
+        # Transition settings
+        self.transition_variable = 1.
+        self.transition_iters = 8e5 // options.batch_size * options.batch_size
+        self.is_transitioning = False
+        self.transition_step = 0
+        self.start_channel_size = options.start_channel_size
+        current_channels = options.start_channel_size
+        self.transition_channels = [
+            current_channels,
+            current_channels,
+            current_channels,
+            current_channels//2,
+            current_channels//4,
+            current_channels//8,
+            current_channels//16,
+            current_channels//32,
+            ]
+        self.start_time = time.time()
+        if not self.load_checkpoint():
+            self.discriminator, self.generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels, options.label_size)
+            self.init_optimizers()
+        self.data_loader = load_dataset(self.dataset, self.batch_size, self.current_imsize)
+
+                
+        self.writer = tensorboardX.SummaryWriter(options.summaries_dir)
+
+        
+        labels = torch.arange(0, options.label_size).repeat(100 // options.label_size)[:100].view(-1, 1) if options.label_size > 0 else None
+        self.z_sample = self.generate_noise(100, labels)
+
+        self.log_model_graphs()
+        
+        self.label_criterion = torch.nn.CrossEntropyLoss(reduction='none')
+
+    def save_checkpoint(self, epoch):
+        filename = "step_{}.ckpt".format(self.global_step)
+        filepath = os.path.join(self.checkpoint_dir, filename)
+        state_dict = {
+            "epoch": epoch + 1,
+            "D": self.discriminator.state_dict(),
+            "G": self.generator.state_dict(),
+            'd_optimizer': self.d_optimizer.state_dict(),
+            'g_optimizer': self.g_optimizer.state_dict(),
+            "batch_size": self.batch_size,
+            "dataset": self.dataset,
+            "num_epochs": self.num_epochs,
+            "label_size": self.label_size,
+            "noise_dim": self.noise_dim,
+            "learning_rate": self.learning_rate,
+            "current_imsize": self.current_imsize,
+            "max_imsize": self.max_imsize,
+            "transition_variable": self.transition_variable,
+            "transition_step": self.transition_step,
+            "is_transitioning": self.is_transitioning,
+            "start_channel_size": self.start_channel_size,
+            "global_step": self.global_step,
+            "image_channels": self.image_channels
+        }
+        save_checkpoint(state_dict,
+                        filepath,
+                        max_keep=2)
+
+    def load_checkpoint(self):
         try:
-            ckpt = load_checkpoint(options.checkpoint_dir)
+            ckpt = load_checkpoint(self.checkpoint_dir)
             self.start_epoch = ckpt['epoch']
-            self.discriminator.load_state_dict(ckpt['discriminator'])
-            self.generator.load_state_dict(ckpt['generator'])
+
+            # Set Hyperparameters
+            
+            self.batch_size = ckpt["batch_size"]
+            self.dataset = ckpt["dataset"]
+            self.num_epochs = ckpt["num_epochs"]
+            self.label_size = ckpt["label_size"]
+            self.noise_dim = ckpt["noise_dim"]
+            self.learning_rate = ckpt["learning_rate"]
+
+            # Image settings
+            self.current_imsize = ckpt["current_imsize"]
+            self.image_channels = ckpt["image_channels"]
+            self.max_imsize = ckpt["max_imsize"]
+
+            # Logging variables
+            # Transition settings
+            self.transition_variable = ckpt["transition_variable"]
+            self.transition_iters = 8e5 // ckpt["batch_size"] * ckpt["batch_size"]
+            self.is_transitioning = ckpt["is_transitioning"]
+            self.transition_step = ckpt["transition_step"]
+            self.global_step = ckpt["global_step"]
+            current_channels = ckpt["start_channel_size"]
+            self.transition_channels = [
+                current_channels,
+                current_channels,
+                current_channels,
+                current_channels//2,
+                current_channels//4,
+                current_channels//8,
+                current_channels//16,
+                current_channels//32,
+                ]
+            self.discriminator, self.generator = init_model(self.current_imsize //(2**self.transition_step), self.noise_dim, current_channels, self.image_channels, self.label_size)
+            for i in range(self.transition_step):
+                self.discriminator.extend(self.transition_channels[i])
+                self.generator.extend(self.transition_channels[i])
+            self.discriminator.load_state_dict(ckpt['D'])
+            self.generator.load_state_dict(ckpt['G'])
+            self.init_optimizers()
+            self.generator.summary()
+            self.discriminator.summary()            
             self.d_optimizer.load_state_dict(ckpt['d_optimizer'])
             self.g_optimizer.load_state_dict(ckpt['g_optimizer'])
-        except:
+            return True
+        except Exception as e:
+            print(e)
             print(' [*] No checkpoint!')
             self.start_epoch = 0
-        self.global_step = 0
+            self.global_step = 0
+            return False
     
     def generate_noise(self, batch_size, labels):
         z = Variable(torch.randn(batch_size, self.noise_dim))
@@ -165,70 +284,8 @@ class Trainer:
 
     def log_variable(self, name, value):
         self.writer.add_scalar(name, value, global_step=self.global_step)
-
-    def __init__(self, options):
-
-        # Set Hyperparameters
-        self.batch_size = options.batch_size
-        self.dataset = options.dataset
-        self.num_epochs = options.num_epochs
-        self.label_size = options.label_size
-        self.noise_dim = options.noise_dim
-        self.learning_rate = options.learning_rate
-
-        # Image settings
-        self.current_imsize = options.imsize
-        self.current_channels = options.start_channel_size
-        self.max_imsize = options.max_imsize
-
-        # Logging variables
-        self.generated_data_dir = options.generated_data_dir
-        self.checkpoint_dir = options.checkpoint_dir
-        self.summaries_dir = options.summaries_dir
-        
-        # Transition settings
-        self.transition_variable = 1.
-        self.transition_iters = 6e5 // options.batch_size * options.batch_size
-        self.is_transitioning = False
-        self.transition_step = 0
-        self.transition_channels = [
-            self.current_channels,
-            self.current_channels,
-            self.current_channels,
-            self.current_channels//2,
-            self.current_channels//4,
-            self.current_channels//8,
-            self.current_channels//16,
-            self.current_channels//32,                                                            
-            
-            ]
-
-        self.start_time = time.time()
-
-
-        self.data_loader = load_dataset(self.dataset, self.batch_size, options.imsize)
-
-        self.discriminator, self.generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels, options.label_size)
-        self.init_optimizers()
-        
-        
-        """ load checkpoint """
-        self.load_checkpoint(self.checkpoint_dir)
-        self.writer = tensorboardX.SummaryWriter(options.summaries_dir)
-
-        
-        labels = torch.arange(0, options.label_size).repeat(100 // options.label_size)[:100].view(-1, 1) if options.label_size > 0 else None
-        self.z_sample = self.generate_noise(100, labels)
-
-        self.log_model_graphs()
-        
-        
-
-        self.label_criterion = torch.nn.CrossEntropyLoss(reduction='none')
-
     
     def train(self):
-
         for epoch in range(self.start_epoch, self.num_epochs):
             for i, (real_data, labels) in tqdm.tqdm(enumerate(self.data_loader), 
                                             total=len(self.data_loader),
@@ -301,7 +358,7 @@ class Trainer:
                 self.log_variable("generator/label-penalty", label_penalty_generator.mean())
 
 
-                if (self.global_step) % (self.batch_size*100) == 0:
+                if (self.global_step) % (self.batch_size*500) == 0:
                     self.generator.eval()
                     fake_data_sample = normalize_img(self.generator(self.z_sample, self.transition_variable).data)
                     save_images(self.writer, fake_data_sample, self.global_step, self.generated_data_dir)
@@ -313,6 +370,7 @@ class Trainer:
                     to_save = normalize_img(real_data[:100])
                     torchvision.utils.save_image(to_save, filepath, nrow=10)
                     
+                    
                 
                 if self.global_step % self.transition_iters == 0:
 
@@ -320,10 +378,11 @@ class Trainer:
                         # Stop transitioning
                         self.is_transitioning = False
                         self.transition_variable = 1.0
+                        self.save_checkpoint(epoch)
                     elif self.current_imsize < self.max_imsize:
-                        self.current_channels = self.transition_channels[self.transition_step]
-                        self.discriminator.extend(self.current_channels)
-                        self.generator.extend(self.current_channels)
+                        current_channels = self.transition_channels[self.transition_step]
+                        self.discriminator.extend(current_channels)
+                        self.generator.extend(current_channels)
                         self.current_imsize *= 2
 
                         
@@ -340,20 +399,14 @@ class Trainer:
                         torchvision.utils.save_image(fake_data_sample[:100], filepath, nrow=10)
                         self.log_model_graphs()
                         self.transition_step += 1
+                        self.save_checkpoint(epoch)
 
                         break
+            self.save_checkpoint(epoch)
 
 
 
-            filename = "Epoch_{}.ckpt".format(epoch)
-            filepath = os.path.join(self.checkpoint_dir, filename)
-            save_checkpoint({'epoch': epoch + 1,
-                                'D': self.discriminator.state_dict(),
-                                'G': self.generator.state_dict(),
-                                'd_optimizer': self.d_optimizer.state_dict(),
-                                'g_optimizer': self.g_optimizer.state_dict()},
-                                filepath,
-                                max_keep=2)
+
 
 if __name__ == '__main__':
     options = load_options()

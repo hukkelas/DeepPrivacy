@@ -79,6 +79,11 @@ def load_options():
     options.checkpoint_dir = os.path.join("checkpoints", options.model_name)
     options.generated_data_dir = os.path.join("generated_data", options.model_name)
     options.summaries_dir = os.path.join("summaries", options.model_name)
+    if os.path.isdir(options.summaries_dir):
+        num_folders = len(os.listdir(options.summaries_dir))
+        options.summaries_dir = os.path.join(options.summaries_dir, str(num_folders))
+    else:
+        options.summaries_dir = os.path.join(options.summaries_dir, str(0))
     os.makedirs(options.checkpoint_dir, exist_ok=True)
     os.makedirs(options.generated_data_dir, exist_ok=True)
     
