@@ -98,8 +98,8 @@ class PixelwiseNormalization(nn.Module):
         super(PixelwiseNormalization, self).__init__()
 
     def forward(self, x):
-        factor = (x**2 + 1e-8).mean(dim=1, keepdim=True)**0.5
-        return x /  factor
+        factor = ((x**2 ).mean(dim=1, keepdim=True)+ 1e-8)**0.5
+        return x / factor
 
 class UpSamplingBlock(nn.Module):
     def __init__(self):

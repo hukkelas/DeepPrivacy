@@ -9,7 +9,7 @@ import tqdm
 from torchsummary import summary
 import os
 from dataloaders import load_mnist, load_cifar10, load_pokemon, load_celeba
-from options import load_options
+from options import load_options, print_options
 import time
 torch.backends.cudnn.benchmark=True
 
@@ -77,8 +77,9 @@ def save_images(writer, images, global_step, directory):
     writer.add_image("Image", image_grid, global_step)
 
 def normalize_img(image):
-    return (image+1)/2
-
+    image = (image +1) / 2
+    image = utils.clip(image, 0, 1)
+    return image
 
 
 def load_dataset(dataset, batch_size, imsize):
@@ -158,8 +159,7 @@ class Trainer:
         self.writer = tensorboardX.SummaryWriter(options.summaries_dir)
 
         
-        labels = torch.arange(0, options.label_size).repeat(100 // options.label_size)[:100].view(-1, 1) if options.label_size > 0 else None
-        self.z_sample = self.generate_noise(100, labels)
+
 
         self.log_model_graphs()
         
@@ -187,7 +187,10 @@ class Trainer:
             "is_transitioning": self.is_transitioning,
             "start_channel_size": self.start_channel_size,
             "global_step": self.global_step,
-            "image_channels": self.image_channels
+            "image_channels": self.image_channels,
+            "z_sample": self.z_sample.data.cpu().numpy(),
+            "total_time": self.total_time
+
         }
         save_checkpoint(state_dict,
                         filepath,
@@ -197,7 +200,7 @@ class Trainer:
         try:
             ckpt = load_checkpoint(self.checkpoint_dir)
             self.start_epoch = ckpt['epoch']
-
+            print_options(ckpt)
             # Set Hyperparameters
             
             self.batch_size = ckpt["batch_size"]
@@ -206,6 +209,7 @@ class Trainer:
             self.label_size = ckpt["label_size"]
             self.noise_dim = ckpt["noise_dim"]
             self.learning_rate = ckpt["learning_rate"]
+            self.z_sample = to_cuda(torch.tensor(ckpt["z_sample"]))
 
             # Image settings
             self.current_imsize = ckpt["current_imsize"]
@@ -219,6 +223,7 @@ class Trainer:
             self.is_transitioning = ckpt["is_transitioning"]
             self.transition_step = ckpt["transition_step"]
             self.global_step = ckpt["global_step"]
+            self.total_time = ckpt["total_time"]
             current_channels = ckpt["start_channel_size"]
             self.transition_channels = [
                 current_channels,
@@ -241,10 +246,13 @@ class Trainer:
             self.discriminator.summary()            
             self.d_optimizer.load_state_dict(ckpt['d_optimizer'])
             self.g_optimizer.load_state_dict(ckpt['g_optimizer'])
+            
             return True
         except Exception as e:
             print(e)
             print(' [*] No checkpoint!')
+            labels = torch.arange(0, options.label_size).repeat(100 // options.label_size)[:100].view(-1, 1) if options.label_size > 0 else None
+            self.z_sample = self.generate_noise(100, labels)
             self.start_epoch = 0
             self.global_step = 0
             return False
@@ -344,7 +352,7 @@ class Trainer:
 
 
                 nsec_per_img = (time.time() - batch_start_time) / self.batch_size
-                total_time = (time.time() - self.start_time) / 60
+                self.total_time = (time.time() - self.start_time) / 60
                 # Log data
                 self.log_variable('discriminator/wasserstein-distance', wasserstein_distance.mean().item())
                 self.log_variable('discriminator/gradient-penalty', gradient_pen.mean().item())
@@ -353,12 +361,12 @@ class Trainer:
                 self.log_variable("discriminator/epsilon-penalty", epsilon_penalty.mean().item())
                 self.log_variable("stats/transition-value", self.transition_variable)
                 self.log_variable("stats/nsec_per_img", nsec_per_img)
-                self.log_variable("stats/training_time_minutes", total_time)
+                self.log_variable("stats/training_time_minutes", self.total_time)
                 self.log_variable("discriminator/label-penalty", label_penalty_discriminator.mean())
                 self.log_variable("generator/label-penalty", label_penalty_generator.mean())
 
 
-                if (self.global_step) % (self.batch_size*500) == 0:
+                if (self.global_step) % (self.batch_size*100) == 0:
                     self.generator.eval()
                     fake_data_sample = normalize_img(self.generator(self.z_sample, self.transition_variable).data)
                     save_images(self.writer, fake_data_sample, self.global_step, self.generated_data_dir)
@@ -369,9 +377,8 @@ class Trainer:
                     filepath = os.path.join(self.generated_data_dir, filename)
                     to_save = normalize_img(real_data[:100])
                     torchvision.utils.save_image(to_save, filepath, nrow=10)
-                    
-                    
-                
+                if self.global_step % (self.batch_size * 1000) == 0:
+                    self.save_checkpoint(epoch)
                 if self.global_step % self.transition_iters == 0:
 
                     if self.global_step % (self.transition_iters*2) == 0:
