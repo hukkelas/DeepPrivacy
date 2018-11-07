@@ -1,6 +1,29 @@
 # DeepPrivacy
 
 
+## Implemented from paper
+
+1. Progressive growing (4x4 -> 1024 possible)
+2. Identical network architecture 
+3. Equalized learning rate
+4. Pixelwise Feature Normalization
+5. Mini-batch Standard Deviation
+6. Auxillary information about labels (MNIST/CIFAR10)
+7. WGAN-GP with epsilon penalty (From Appendix A.1)
+
+## Differences from paper
+1. Learning rate. We use 0.0002 instead of 0.001 (seems to work better with our implementation)
+
+
+## TODO: 
+1. Generate and train on CelebaHQ 
+2. Track Inception Score and Sliced Wasserstein Distance
+3. Train network on 128x128, 256x256 ++
+
+
+## Current result (64x64) on original aligned CelebA
+![alt text](examples/64x64.jpg)
+
 ## Requirements
 Pytorch >= 0.4
 Python >= 3.6
