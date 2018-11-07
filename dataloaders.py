@@ -68,6 +68,7 @@ def load_celeba(batch_size, imsize=128):
     if imsize != 128:
         transform +=  [transforms.Resize([imsize, imsize])]
     transform += [
+        transforms.RandomHorizontalFlip(0.5),
         transforms.ToTensor(),
     ]
     transform = transforms.Compose(transform)

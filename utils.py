@@ -64,3 +64,10 @@ def load_checkpoint(ckpt_dir_or_file, map_location=None, load_best=False):
     ckpt = torch.load(ckpt_path, map_location=map_location)
     print(' [*] Loading checkpoint from %s succeed!' % ckpt_path)
     return ckpt
+
+
+
+def clip(tensor, min_val, max_val):
+    tensor[tensor < min_val] = min_val
+    tensor[tensor > max_val] = max_val
+    return tensor

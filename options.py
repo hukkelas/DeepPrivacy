@@ -81,7 +81,7 @@ def load_options():
     options.summaries_dir = os.path.join("summaries", options.model_name)
     if os.path.isdir(options.summaries_dir):
         num_folders = len(os.listdir(options.summaries_dir))
-        options.summaries_dir = os.path.join(options.summaries_dir, str(num_folders))
+        options.summaries_dir = os.path.join(options.summaries_dir, str(num_folders//3))
     else:
         options.summaries_dir = os.path.join(options.summaries_dir, str(0))
     os.makedirs(options.checkpoint_dir, exist_ok=True)
