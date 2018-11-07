@@ -14,7 +14,8 @@ def to_cuda(elements):
 def init_weights(m):
     if type(m) == torch.nn.Conv2d:
         torch.nn.init.xavier_normal_(m.weight)
-        m.bias.data.fill_(0.0)
+        if m.bias is not None:
+            m.bias.data.fill_(0.0)
     if type(m) == torch.nn.Linear:
         torch.nn.init.xavier_normal_(m.weight)
         m.bias.data.fill_(0.0)
@@ -63,3 +64,10 @@ def load_checkpoint(ckpt_dir_or_file, map_location=None, load_best=False):
     ckpt = torch.load(ckpt_path, map_location=map_location)
     print(' [*] Loading checkpoint from %s succeed!' % ckpt_path)
     return ckpt
+
+
+
+def clip(tensor, min_val, max_val):
+    tensor[tensor < min_val] = min_val
+    tensor[tensor > max_val] = max_val
+    return tensor
