@@ -23,12 +23,12 @@ python train.py
 1. Build docker image file ( Done from same folder as `Dockerfile`) 
 
 ```bash
-docker build -t coolImageName . 
+docker build -t pytorch-gpu-ext . 
 ```
 
 2. Run training with docker (Launch in same folder as `train.py`)
 ```bash
-nvidia-docker run --rm  -it -v $PWD:/app  -e CUDA_VISIBLE_DEVICES=1 coolImageName python train.py 
+nvidia-docker run --rm  -it -v $PWD:/app  -e CUDA_VISIBLE_DEVICES=1 pytorch-gpu-ext python train.py 
 ```
 
 `CUDA_VISIBLE_DEVIES` sets what GPU to use
