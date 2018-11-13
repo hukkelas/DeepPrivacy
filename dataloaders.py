@@ -64,19 +64,11 @@ def load_pokemon(batch_size, imsize=96):
 
 
 def load_celeba(batch_size, imsize=128):
-    celeba_data = CelebADataset("data/celebahq_torch", imsize)
-    data_loader = torch.utils.data.DataLoader(celeba_data,
-                                            batch_size=batch_size,
-                                            shuffle=True,
-                                            num_workers=8,
-                                            pin_memory=True)
-    return data_loader
+    return CelebAGenerator("data/celebahq_torch", imsize, batch_size)
+    
+class CelebAGenerator:
 
-
-class CelebADataset(torch.utils.data.Dataset):
-
-
-    def __init__(self, dirpath, imsize):
+    def __init__(self, dirpath, imsize, batch_size):
         filepath = os.path.join(dirpath, "{}.torch".format(imsize))
         assert os.path.isfile(filepath), "Did not find file in filepath:{}".format(filepath)
         images = torch.load(filepath)
@@ -84,16 +76,30 @@ class CelebADataset(torch.utils.data.Dataset):
         expected_shape = (3, imsize, imsize)
         assert images.shape[1:] == expected_shape, "Shape was: {}. Expected: {}".format(images.shape[1:], expected_shape)
         self.images = images
+        self.n_samples = images.shape[0]
+        self.batch_size = batch_size
+        self.indices = torch.LongTensor(self.batch_size)
+        self.ones = torch.ones(self.batch_size, dtype=torch.long)
+        self.max = self.n_samples // self.batch_size
+
     
     def __len__(self):
         return self.images.shape[0]
+
+    def __iter__(self):
+        self.n = 0
+        return self
     
-    def __getitem__(self, idx):
-        image = self.images[idx]
-        if np.random.random() > 0.5: # flip
-            image = utils.flip_horizontal(image)
-        return image, torch.tensor(1)
+    def __next__(self):
+        if self.n > self.max:
+            raise StopIteration
+        self.n += 1
+        indices = self.indices.random_(0, self.n_samples)
+        images = self.images[indices]
+        to_flip = torch.rand(self.batch_size) > 0.5
+        images[to_flip] = utils.flip_horizontal(images[to_flip])
+        return images, self.ones
+
 
     
-
 
