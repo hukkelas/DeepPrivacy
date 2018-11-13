@@ -71,3 +71,10 @@ def clip(tensor, min_val, max_val):
     tensor[tensor < min_val] = min_val
     tensor[tensor > max_val] = max_val
     return tensor
+
+
+
+def flip_horizontal(image):
+    # Flip on -1 dimension
+    idx = torch.arange(image.shape[-1] -1, -1, -1 ,dtype=torch.long)
+    return image[:, :, idx]

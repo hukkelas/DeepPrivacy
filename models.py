@@ -128,6 +128,7 @@ class Generator(nn.Module):
             PixelwiseNormalization(),
             conv_bn_relu(noise_dim, start_channel_dim, 4, 3)
         )
+        self.transition_value = 1.0
     
     def extend(self, output_dim):
         # Find input shape
@@ -156,7 +157,7 @@ class Generator(nn.Module):
 
 
     # x: Bx1x1x512
-    def forward(self, x, transition_variable=1):
+    def forward(self, x):
         x = x.view((x.shape[0], self.noise_dim, 1, 1))
         x = self.first_block(x)
         x = x.view(x.shape[0], -1, 4, 4)
@@ -167,7 +168,7 @@ class Generator(nn.Module):
         x_new = self.to_rgb_new(x_new)
         self.old = x_old
         self.new = x_new
-        x = get_transition_value(x_old, x_new, transition_variable)
+        x = get_transition_value(x_old, x_new, self.transition_value)
         return x
     
     def summary(self):
@@ -202,6 +203,7 @@ class Discriminator(nn.Module):
             conv_module(start_channel_dim, start_channel_dim, 4, 0, 1),            
         )
         self.output_layer = nn.Linear(start_channel_dim, 1 + label_size)
+        self.transition_value = 1.0
 
         
     def extend(self, input_dim):
@@ -236,11 +238,11 @@ class Discriminator(nn.Module):
 
 
     # x: Bx1x1x512
-    def forward(self, x, transition_variable=1):
+    def forward(self, x):
         x_old = self.from_rgb_old(x)
         x_new = self.from_rgb_new(x)
         x_new = self.new_block(x_new)
-        x = get_transition_value(x_old, x_new, transition_variable)
+        x = get_transition_value(x_old, x_new, self.transition_value)
         x = self.core_model(x)
         x = x.view(x.shape[0], -1)
         x = self.output_layer(x)

@@ -3,14 +3,15 @@ from wordgenerator import generate_random_word
 import os
 import math
 DEFAULT_NUM_EPOCHS = 500
-DEFAULT_BATCH_SIZE = 64
+DEFAULT_BATCH_SIZE = "128,128,128,64,32,16,8,4,4"
 DEFAULT_N_CRITIC = 1
-DEFAULT_LEARNING_RATE = 0.001
-DEFAULT_NOISE_DIM = 256
+DEFAULT_LEARNING_RATE = 0.0004
+DEFAULT_NOISE_DIM = 512
 DEFAULT_IMSIZE = 4
-DEFAULT_MAX_IMSIZE = 256
-DEFAULT_START_CHANNEL_SIZE = 256
+DEFAULT_MAX_IMSIZE = 512
+DEFAULT_START_CHANNEL_SIZE = 512
 DEFALUT_DATASET = "celeba"
+DEFAULT_TRANSITION_ITERS = 12e5
 
 # 4 -> 8 // 128 -> 64
 # 8 -> 16 // 64 -> 32
@@ -35,8 +36,8 @@ def print_options(options):
 def load_options():
     parser = OptionParser()
     parser.add_option("-b", "--batch-size", dest="batch_size",
-                      help="Set batch size for training",
-                      default=DEFAULT_BATCH_SIZE, type=int)
+                      help="Set batch size for training. Format: {batch-size 4x4},{bs, 8x8},{16x16},..{1024x1024}",
+                      default=DEFAULT_BATCH_SIZE)
     parser.add_option("-c", "--n-critic", dest="n_critic",
                       help="Set number of critic(discriminator) batch step per generator step",
                       default=DEFAULT_N_CRITIC, type=int)
@@ -64,7 +65,9 @@ def load_options():
     parser.add_option("--dataset", dest="dataset",
                       help="Set the dataset to load",
                       default=DEFALUT_DATASET)
-
+    parser.add_option("--transition-iters", dest="transition_iters",
+                      help="Set the number of images to show each transition phase",
+                      default=DEFAULT_TRANSITION_ITERS)
             
     options, _ = parser.parse_args()
 
@@ -74,7 +77,6 @@ def load_options():
         options.label_size = 0
 
     validate_start_channel_size(options.max_imsize, options.start_channel_size)
-
 
     options.checkpoint_dir = os.path.join("checkpoints", options.model_name)
     options.generated_data_dir = os.path.join("generated_data", options.model_name)
@@ -87,10 +89,19 @@ def load_options():
     os.makedirs(options.checkpoint_dir, exist_ok=True)
     os.makedirs(options.generated_data_dir, exist_ok=True)
     
+
+    # Image channels
     if options.dataset == "mnist":
         options.image_channels = 1
     else:
         options.image_channels = 3
+    imsizes = [4*2**i for i in range(0,9)]
+    print(len(imsizes))
+    batch_sizes = options.batch_size.split(",")
+    print(len(batch_sizes))
+    scheduled_batch_size = {imsize: int(batch_sizes[i]) for i, imsize in enumerate(imsizes)}
+
+    options.batch_size = scheduled_batch_size 
 
     print_options(options)
     return options
