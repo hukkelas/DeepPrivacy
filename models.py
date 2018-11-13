@@ -192,6 +192,7 @@ class Discriminator(nn.Module):
                  label_size
                  ):
         super(Discriminator, self).__init__()
+        self.label_size = label_size
         self.image_channels = in_channels
         self.current_input_imsize = 4
         self.from_rgb_new = conv_module(in_channels, start_channel_dim, 1, 0, self.current_input_imsize)
@@ -246,8 +247,9 @@ class Discriminator(nn.Module):
         x = self.core_model(x)
         x = x.view(x.shape[0], -1)
         x = self.output_layer(x)
-
-        return x[:, :1], x[:, 1:]
+        if self.label_size > 0:
+            return x[:, :1], x[:, 1:]
+        return x, None
     
     def summary(self):
         print("="*80)

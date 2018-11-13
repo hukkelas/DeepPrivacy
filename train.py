@@ -12,7 +12,7 @@ from dataloaders import load_mnist, load_cifar10, load_pokemon, load_celeba
 from options import load_options, print_options
 import time
 torch.backends.cudnn.benchmark=True
-import psutil
+
 
 def gradient_penalty(real_data, fake_data, discriminator):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() -1)
@@ -164,7 +164,7 @@ class Trainer:
         
         print("CUDA AVAILABLE:", torch.cuda.is_available())
         print("DEVICE COUNT:", torch.cuda.device_count())
-        print(psutil.virtual_memory())
+
 
         #self.log_model_graphs()
         
