@@ -2,16 +2,19 @@ from optparse import OptionParser
 from wordgenerator import generate_random_word
 import os
 import math
+import json
 DEFAULT_NUM_EPOCHS = 500
-DEFAULT_BATCH_SIZE = 64
+DEFAULT_BATCH_SIZE = "128,128,128,64,32,16,8,4,4"
 DEFAULT_N_CRITIC = 1
-DEFAULT_LEARNING_RATE = 0.001
-DEFAULT_NOISE_DIM = 256
+DEFAULT_LEARNING_RATE = 0.00075
+DEFAULT_NOISE_DIM = 512
 DEFAULT_IMSIZE = 4
-DEFAULT_MAX_IMSIZE = 256
-DEFAULT_START_CHANNEL_SIZE = 256
+DEFAULT_MAX_IMSIZE = 512
+DEFAULT_START_CHANNEL_SIZE = 512
 DEFALUT_DATASET = "celeba"
-
+DEFAULT_TRANSITION_ITERS = 12e5
+OPTIONS_DIR = "options"
+os.makedirs(OPTIONS_DIR, exist_ok=True)
 # 4 -> 8 // 128 -> 64
 # 8 -> 16 // 64 -> 32
 # 16 -> 32 // 32 -> 16
@@ -24,19 +27,28 @@ def validate_start_channel_size(max_imsize, start_channel_size):
     n_channel_halving = math.log(start_channel_size, 2)
     assert n_image_double < n_channel_halving
 
-def print_options(options):
-    dic = vars(options)
+def print_options(dic):
+    #dic = vars(options)
     print("="*80)
     print("OPTIONS USED:")
+    banned_keys = ["G", "D", "g_optimizer", "d_optimizer", "z_sample"]
     for (key, item) in dic.items():
+        if key in banned_keys:
+            continue
         print("{:<16} {}".format(key, item))
     print("="*80)
+
+def write_options(options, name):
+    path = os.path.join(OPTIONS_DIR, name, "options.json")
+    os.makedirs(os.path.join(OPTIONS_DIR, name), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(options, f)
 
 def load_options():
     parser = OptionParser()
     parser.add_option("-b", "--batch-size", dest="batch_size",
-                      help="Set batch size for training",
-                      default=DEFAULT_BATCH_SIZE, type=int)
+                      help="Set batch size for training. Format: {batch-size 4x4},{bs, 8x8},{16x16},..{1024x1024}",
+                      default=DEFAULT_BATCH_SIZE)
     parser.add_option("-c", "--n-critic", dest="n_critic",
                       help="Set number of critic(discriminator) batch step per generator step",
                       default=DEFAULT_N_CRITIC, type=int)
@@ -64,7 +76,9 @@ def load_options():
     parser.add_option("--dataset", dest="dataset",
                       help="Set the dataset to load",
                       default=DEFALUT_DATASET)
-
+    parser.add_option("--transition-iters", dest="transition_iters",
+                      help="Set the number of images to show each transition phase",
+                      default=DEFAULT_TRANSITION_ITERS)
             
     options, _ = parser.parse_args()
 
@@ -75,24 +89,33 @@ def load_options():
 
     validate_start_channel_size(options.max_imsize, options.start_channel_size)
 
-
     options.checkpoint_dir = os.path.join("checkpoints", options.model_name)
     options.generated_data_dir = os.path.join("generated_data", options.model_name)
     options.summaries_dir = os.path.join("summaries", options.model_name)
     if os.path.isdir(options.summaries_dir):
         num_folders = len(os.listdir(options.summaries_dir))
-        options.summaries_dir = os.path.join(options.summaries_dir, str(num_folders//3))
+        options.summaries_dir = os.path.join(options.summaries_dir, str(num_folders))
     else:
         options.summaries_dir = os.path.join(options.summaries_dir, str(0))
     os.makedirs(options.checkpoint_dir, exist_ok=True)
     os.makedirs(options.generated_data_dir, exist_ok=True)
     
+
+    # Image channels
     if options.dataset == "mnist":
         options.image_channels = 1
     else:
         options.image_channels = 3
+    imsizes = [4*2**i for i in range(0,9)]
+    print(len(imsizes))
+    batch_sizes = options.batch_size.split(",")
+    print(len(batch_sizes))
+    scheduled_batch_size = {imsize: int(batch_sizes[i]) for i, imsize in enumerate(imsizes)}
 
-    print_options(options)
+    options.batch_size = scheduled_batch_size 
+
+    print_options(vars(options))
+    write_options(vars(options), options.model_name)
     return options
 
 

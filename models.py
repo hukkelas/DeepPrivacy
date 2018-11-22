@@ -21,11 +21,11 @@ class MinibatchStdLayer(nn.Module):
         y = y.pow(2).mean(dim=0)
         y = torch.sqrt(y + 1e-8)
         # Mean over minibatch, height and width
-        y = y.mean(dim=1, keepdim=True).mean(dim=3, keepdim=True).mean(dim=4, keepdim=True)
+        y = y.mean(dim=1, keepdim=True).mean(dim=2, keepdim=True).mean(dim=3, keepdim=True)
         y = y.to(x.dtype)
         # Tiling over (mb_size, channels, height, width)
-        y = y.repeat(group_size, channels, 1, width)
-        return torch.cat(x, y, dim=1)
+        y = y.repeat(group_size, 1, height, width)
+        return torch.cat((x, y), dim=1)
 
 
 # https://github.com/nvnbny/progressive_growing_of_gans/blob/master/modelUtils.py
@@ -86,6 +86,7 @@ def conv_bn_relu(in_dim, out_dim, kernel_size, padding=0):
         EqualizedConv2D(in_dim, out_dim, kernel_size, padding),
         nn.LeakyReLU(negative_slope=.2),
         PixelwiseNormalization()
+        #nn.BatchNorm2d(out_dim)
     )
 
 
@@ -128,6 +129,7 @@ class Generator(nn.Module):
             PixelwiseNormalization(),
             conv_bn_relu(noise_dim, start_channel_dim, 4, 3)
         )
+        self.transition_value = 1.0
     
     def extend(self, output_dim):
         # Find input shape
@@ -156,7 +158,7 @@ class Generator(nn.Module):
 
 
     # x: Bx1x1x512
-    def forward(self, x, transition_variable=1):
+    def forward(self, x):
         x = x.view((x.shape[0], self.noise_dim, 1, 1))
         x = self.first_block(x)
         x = x.view(x.shape[0], -1, 4, 4)
@@ -167,7 +169,7 @@ class Generator(nn.Module):
         x_new = self.to_rgb_new(x_new)
         self.old = x_old
         self.new = x_new
-        x = get_transition_value(x_old, x_new, transition_variable)
+        x = get_transition_value(x_old, x_new, self.transition_value)
         return x
     
     def summary(self):
@@ -191,6 +193,7 @@ class Discriminator(nn.Module):
                  label_size
                  ):
         super(Discriminator, self).__init__()
+        self.label_size = label_size
         self.image_channels = in_channels
         self.current_input_imsize = 4
         self.from_rgb_new = conv_module(in_channels, start_channel_dim, 1, 0, self.current_input_imsize)
@@ -198,10 +201,12 @@ class Discriminator(nn.Module):
         self.from_rgb_old = conv_module(in_channels, start_channel_dim, 1, 0, self.current_input_imsize)
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
-            conv_module(start_channel_dim, start_channel_dim, 3, 1, imsize),
+            MinibatchStdLayer(),
+            conv_module(start_channel_dim+1, start_channel_dim, 3, 1, imsize),
             conv_module(start_channel_dim, start_channel_dim, 4, 0, 1),            
         )
         self.output_layer = nn.Linear(start_channel_dim, 1 + label_size)
+        self.transition_value = 1.0
 
         
     def extend(self, input_dim):
@@ -236,16 +241,17 @@ class Discriminator(nn.Module):
 
 
     # x: Bx1x1x512
-    def forward(self, x, transition_variable=1):
+    def forward(self, x):
         x_old = self.from_rgb_old(x)
         x_new = self.from_rgb_new(x)
         x_new = self.new_block(x_new)
-        x = get_transition_value(x_old, x_new, transition_variable)
+        x = get_transition_value(x_old, x_new, self.transition_value)
         x = self.core_model(x)
         x = x.view(x.shape[0], -1)
         x = self.output_layer(x)
-
-        return x[:, :1], x[:, 1:]
+        if self.label_size > 0:
+            return x[:, :1], x[:, 1:]
+        return x, None
     
     def summary(self):
         print("="*80)

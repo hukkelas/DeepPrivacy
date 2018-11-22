@@ -14,14 +14,15 @@ import time
 torch.backends.cudnn.benchmark=True
 
 
-def gradient_penalty(real_data, fake_data, discriminator, transition_variable):
+def gradient_penalty(real_data, fake_data, discriminator):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() -1)
     epsilon = torch.rand(epsilon_shape)
     epsilon = to_cuda(epsilon)
+    
     x_hat = epsilon * real_data + (1-epsilon) * fake_data.detach()
     x_hat = to_cuda(Variable(x_hat, requires_grad=True))
 
-    logits, _ = discriminator(x_hat, transition_variable)
+    logits, _ = discriminator(x_hat)
     grad = torch.autograd.grad(
         outputs=logits,
         inputs=x_hat,
@@ -38,8 +39,8 @@ class DataParallellWrapper(torch.nn.Module):
         self.model = model
         self.forward_block = torch.nn.DataParallel(self.model)
 
-    def forward(self, x, transition_variable):
-        return self.forward_block(x, transition_variable)
+    def forward(self, x):
+        return self.forward_block(x)
     
     def extend(self, channel_size):
         self.model.extend(channel_size)
@@ -47,6 +48,9 @@ class DataParallellWrapper(torch.nn.Module):
     
     def summary(self):
         self.model.summary()
+    
+    def update_transition_value(self, value):
+        self.model.transition_value = value
 
 
 def init_model(imsize, noise_dim, start_channel_dim, image_channels, label_size):
@@ -57,8 +61,8 @@ def init_model(imsize, noise_dim, start_channel_dim, image_channels, label_size)
     to_cuda([discriminator, generator])
     #discriminator.apply(init_weights)
     #generator.apply(init_weights)
-    discriminator.summary()
-    generator.summary()
+    #discriminator.summary()
+    #generator.summary()
     return discriminator, generator
 
 
@@ -77,7 +81,7 @@ def save_images(writer, images, global_step, directory):
     writer.add_image("Image", image_grid, global_step)
 
 def normalize_img(image):
-    image = (image +1) / 2
+    image = (image + 1) / 2
     image = utils.clip(image, 0, 1)
     return image
 
@@ -89,8 +93,8 @@ def load_dataset(dataset, batch_size, imsize):
         return load_cifar10(batch_size, imsize)
     if dataset == "celeba":
         return load_celeba(batch_size, imsize)
-
-
+    if dataset == "pokemon":
+        return load_pokemon(batch_size, imsize)
 
 def preprocess_images(images, transition_variable):
     images = Variable(images)
@@ -115,7 +119,8 @@ class Trainer:
     def __init__(self, options):
 
         # Set Hyperparameters
-        self.batch_size = options.batch_size
+        self.batch_size_schedule = options.batch_size
+        self.batch_size = options.batch_size[options.imsize]
         self.dataset = options.dataset
         self.num_epochs = options.num_epochs
         self.label_size = options.label_size
@@ -134,7 +139,7 @@ class Trainer:
         
         # Transition settings
         self.transition_variable = 1.
-        self.transition_iters = 8e5 // options.batch_size * options.batch_size
+        self.transition_iters = options.transition_iters // self.batch_size * self.batch_size
         self.is_transitioning = False
         self.transition_step = 0
         self.start_channel_size = options.start_channel_size
@@ -159,11 +164,15 @@ class Trainer:
         self.writer = tensorboardX.SummaryWriter(options.summaries_dir)
 
         
+        print("CUDA AVAILABLE:", torch.cuda.is_available())
+        print("DEVICE COUNT:", torch.cuda.device_count())
 
 
-        self.log_model_graphs()
+        #self.log_model_graphs()
         
         self.label_criterion = torch.nn.CrossEntropyLoss(reduction='none')
+        self.discriminator.update_transition_value(self.transition_variable)
+        self.generator.update_transition_value(self.transition_variable)
 
     def save_checkpoint(self, epoch):
         filename = "step_{}.ckpt".format(self.global_step)
@@ -189,7 +198,9 @@ class Trainer:
             "global_step": self.global_step,
             "image_channels": self.image_channels,
             "z_sample": self.z_sample.data.cpu().numpy(),
-            "total_time": self.total_time
+            "total_time": self.total_time,
+            "batch_size_schedule": self.batch_size_schedule,
+            "transition_iters":  self.transition_iters
 
         }
         save_checkpoint(state_dict,
@@ -204,6 +215,7 @@ class Trainer:
             # Set Hyperparameters
             
             self.batch_size = ckpt["batch_size"]
+            self.batch_size_schedule = ckpt["batch_size_schedule"]
             self.dataset = ckpt["dataset"]
             self.num_epochs = ckpt["num_epochs"]
             self.label_size = ckpt["label_size"]
@@ -219,11 +231,14 @@ class Trainer:
             # Logging variables
             # Transition settings
             self.transition_variable = ckpt["transition_variable"]
-            self.transition_iters = 8e5 // ckpt["batch_size"] * ckpt["batch_size"]
+            #self.transition_iters = ckpt["transition_iters"]
+            self.transition_iters = 12e5 // ckpt["batch_size"] * ckpt["batch_size"]
             self.is_transitioning = ckpt["is_transitioning"]
             self.transition_step = ckpt["transition_step"]
             self.global_step = ckpt["global_step"]
-            self.total_time = ckpt["total_time"]
+            #self.total_time = ckpt["total_time"]
+            self.start_time = time.time() - ckpt["total_time"] * 60
+            
             current_channels = ckpt["start_channel_size"]
             self.transition_channels = [
                 current_channels,
@@ -248,7 +263,7 @@ class Trainer:
             self.g_optimizer.load_state_dict(ckpt['g_optimizer'])
             
             return True
-        except Exception as e:
+        except KeyError as e:
             print(e)
             print(' [*] No checkpoint!')
             labels = torch.arange(0, options.label_size).repeat(100 // options.label_size)[:100].view(-1, 1) if options.label_size > 0 else None
@@ -269,6 +284,7 @@ class Trainer:
             z[:, :self.label_size] = labels_onehot
         z = to_cuda(z)
         return z
+    
 
 
     def log_model_graphs(self):
@@ -295,27 +311,27 @@ class Trainer:
     
     def train(self):
         for epoch in range(self.start_epoch, self.num_epochs):
-            for i, (real_data, labels) in tqdm.tqdm(enumerate(self.data_loader), 
-                                            total=len(self.data_loader),
-                                            desc="Global step: {:10.0f}".format(self.global_step)):
+            for i, (real_data, labels) in enumerate(self.data_loader):
                 batch_start_time = time.time()
                 self.generator.train()
                 labels = to_cuda(Variable(labels))
                 self.global_step += 1 * self.batch_size
                 if self.is_transitioning:
                     self.transition_variable = ((self.global_step-1) % self.transition_iters) / self.transition_iters
+                    self.discriminator.update_transition_value(self.transition_variable)
+                    self.generator.update_transition_value(self.transition_variable)
+                    
                 real_data = preprocess_images(real_data, self.transition_variable)
                 z = self.generate_noise(real_data.shape[0], labels)
 
                 # Forward G
-                fake_data = self.generator(z, self.transition_variable)
-
+                fake_data = self.generator(z)
                 # Train Discriminator
-                real_scores, real_logits = self.discriminator(real_data, self.transition_variable)
-                fake_scores, fake_logits = self.discriminator(fake_data.detach(), self.transition_variable)
+                real_scores, real_logits = self.discriminator(real_data)
+                fake_scores, fake_logits = self.discriminator(fake_data.detach())
 
                 wasserstein_distance = (real_scores - fake_scores).squeeze()  # Wasserstein-1 Distance
-                gradient_pen = gradient_penalty(real_data.data, fake_data.data, self.discriminator, self.transition_variable)
+                gradient_pen = gradient_penalty(real_data.data, fake_data.data, self.discriminator)
                 # Epsilon penalty
                 epsilon_penalty = (real_scores ** 2).squeeze()
 
@@ -337,7 +353,7 @@ class Trainer:
 
 
                 # Forward G
-                fake_scores, fake_logits = self.discriminator(fake_data, self.transition_variable)
+                fake_scores, fake_logits = self.discriminator(fake_data)
                 
                 # Label loss penalty
                 label_penalty_generator = self.label_criterion(fake_logits, labels).squeeze() if self.label_size > 0 else to_cuda(torch.Tensor([0]))
@@ -366,9 +382,10 @@ class Trainer:
                 self.log_variable("generator/label-penalty", label_penalty_generator.mean())
 
 
-                if (self.global_step) % (self.batch_size*100) == 0:
+                if (self.global_step) % (self.batch_size*500) == 0:
                     self.generator.eval()
-                    fake_data_sample = normalize_img(self.generator(self.z_sample, self.transition_variable).data)
+                    print(os.system("nvidia-smi"))
+                    fake_data_sample = normalize_img(self.generator(self.z_sample).data)
                     save_images(self.writer, fake_data_sample, self.global_step, self.generated_data_dir)
 
                     # Save input images
@@ -385,12 +402,16 @@ class Trainer:
                         # Stop transitioning
                         self.is_transitioning = False
                         self.transition_variable = 1.0
+                        self.discriminator.update_transition_value(self.transition_variable)
+                        self.generator.update_transition_value(self.transition_variable)
                         self.save_checkpoint(epoch)
                     elif self.current_imsize < self.max_imsize:
                         current_channels = self.transition_channels[self.transition_step]
                         self.discriminator.extend(current_channels)
                         self.generator.extend(current_channels)
                         self.current_imsize *= 2
+
+                        self.batch_size = self.batch_size_schedule[self.current_imsize]
 
                         
                         self.discriminator.summary(), self.generator.summary()
@@ -399,12 +420,14 @@ class Trainer:
 
                         self.init_optimizers()
                         self.transition_variable = 0
-                        
-                        fake_data_sample = normalize_img(self.generator(self.z_sample, self.transition_variable).data)
+                        self.discriminator.update_transition_value(self.transition_variable)
+                        self.generator.update_transition_value(self.transition_variable)
+
+                        fake_data_sample = normalize_img(self.generator(self.z_sample).data)
                         os.makedirs("lol", exist_ok=True)
                         filepath = os.path.join("lol", "test.jpg")
                         torchvision.utils.save_image(fake_data_sample[:100], filepath, nrow=10)
-                        self.log_model_graphs()
+                        #self.log_model_graphs()
                         self.transition_step += 1
                         self.save_checkpoint(epoch)
 
