@@ -21,11 +21,11 @@ class MinibatchStdLayer(nn.Module):
         y = y.pow(2).mean(dim=0)
         y = torch.sqrt(y + 1e-8)
         # Mean over minibatch, height and width
-        y = y.mean(dim=1, keepdim=True).mean(dim=3, keepdim=True).mean(dim=4, keepdim=True)
+        y = y.mean(dim=1, keepdim=True).mean(dim=2, keepdim=True).mean(dim=3, keepdim=True)
         y = y.to(x.dtype)
         # Tiling over (mb_size, channels, height, width)
-        y = y.repeat(group_size, channels, 1, width)
-        return torch.cat(x, y, dim=1)
+        y = y.repeat(group_size, 1, height, width)
+        return torch.cat((x, y), dim=1)
 
 
 # https://github.com/nvnbny/progressive_growing_of_gans/blob/master/modelUtils.py
@@ -86,6 +86,7 @@ def conv_bn_relu(in_dim, out_dim, kernel_size, padding=0):
         EqualizedConv2D(in_dim, out_dim, kernel_size, padding),
         nn.LeakyReLU(negative_slope=.2),
         PixelwiseNormalization()
+        #nn.BatchNorm2d(out_dim)
     )
 
 
@@ -200,7 +201,8 @@ class Discriminator(nn.Module):
         self.from_rgb_old = conv_module(in_channels, start_channel_dim, 1, 0, self.current_input_imsize)
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
-            conv_module(start_channel_dim, start_channel_dim, 3, 1, imsize),
+            MinibatchStdLayer(),
+            conv_module(start_channel_dim+1, start_channel_dim, 3, 1, imsize),
             conv_module(start_channel_dim, start_channel_dim, 4, 0, 1),            
         )
         self.output_layer = nn.Linear(start_channel_dim, 1 + label_size)

@@ -2,17 +2,19 @@ from optparse import OptionParser
 from wordgenerator import generate_random_word
 import os
 import math
+import json
 DEFAULT_NUM_EPOCHS = 500
 DEFAULT_BATCH_SIZE = "128,128,128,64,32,16,8,4,4"
 DEFAULT_N_CRITIC = 1
-DEFAULT_LEARNING_RATE = 0.0004
+DEFAULT_LEARNING_RATE = 0.00075
 DEFAULT_NOISE_DIM = 512
 DEFAULT_IMSIZE = 4
 DEFAULT_MAX_IMSIZE = 512
 DEFAULT_START_CHANNEL_SIZE = 512
 DEFALUT_DATASET = "celeba"
 DEFAULT_TRANSITION_ITERS = 12e5
-
+OPTIONS_DIR = "options"
+os.makedirs(OPTIONS_DIR, exist_ok=True)
 # 4 -> 8 // 128 -> 64
 # 8 -> 16 // 64 -> 32
 # 16 -> 32 // 32 -> 16
@@ -25,13 +27,22 @@ def validate_start_channel_size(max_imsize, start_channel_size):
     n_channel_halving = math.log(start_channel_size, 2)
     assert n_image_double < n_channel_halving
 
-def print_options(options):
-    dic = vars(options)
+def print_options(dic):
+    #dic = vars(options)
     print("="*80)
     print("OPTIONS USED:")
+    banned_keys = ["G", "D", "g_optimizer", "d_optimizer", "z_sample"]
     for (key, item) in dic.items():
+        if key in banned_keys:
+            continue
         print("{:<16} {}".format(key, item))
     print("="*80)
+
+def write_options(options, name):
+    path = os.path.join(OPTIONS_DIR, name, "options.json")
+    os.makedirs(os.path.join(OPTIONS_DIR, name), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(options, f)
 
 def load_options():
     parser = OptionParser()
@@ -83,7 +94,7 @@ def load_options():
     options.summaries_dir = os.path.join("summaries", options.model_name)
     if os.path.isdir(options.summaries_dir):
         num_folders = len(os.listdir(options.summaries_dir))
-        options.summaries_dir = os.path.join(options.summaries_dir, str(num_folders//3))
+        options.summaries_dir = os.path.join(options.summaries_dir, str(num_folders))
     else:
         options.summaries_dir = os.path.join(options.summaries_dir, str(0))
     os.makedirs(options.checkpoint_dir, exist_ok=True)
@@ -103,7 +114,8 @@ def load_options():
 
     options.batch_size = scheduled_batch_size 
 
-    print_options(options)
+    print_options(vars(options))
+    write_options(vars(options), options.model_name)
     return options
 
 

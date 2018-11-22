@@ -33,6 +33,7 @@ def load_cifar10(batch_size, imsize=32):
     if imsize != 32:
         transform +=  [transforms.Resize([imsize, imsize])]
     transform += [
+        transforms.RandomHorizontalFlip(0.5),
         transforms.ToTensor(),
         #transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
     ]
@@ -52,6 +53,7 @@ def load_pokemon(batch_size, imsize=96):
     if imsize != 96:
         transform +=  [transforms.Resize([imsize, imsize])]
     transform += [
+        transforms.RandomHorizontalFlip(.5),
         transforms.ToTensor(),
     ]
     transform = transforms.Compose(transform)
@@ -97,7 +99,10 @@ class CelebAGenerator:
         indices = self.indices.random_(0, self.n_samples)
         images = self.images[indices]
         to_flip = torch.rand(self.batch_size) > 0.5
-        images[to_flip] = utils.flip_horizontal(images[to_flip])
+        try:
+            images[to_flip] = utils.flip_horizontal(images[to_flip])
+        except:
+            print("failed")
         return images, self.ones
 
 

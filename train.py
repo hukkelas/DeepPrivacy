@@ -93,6 +93,8 @@ def load_dataset(dataset, batch_size, imsize):
         return load_cifar10(batch_size, imsize)
     if dataset == "celeba":
         return load_celeba(batch_size, imsize)
+    if dataset == "pokemon":
+        return load_pokemon(batch_size, imsize)
 
 def preprocess_images(images, transition_variable):
     images = Variable(images)
@@ -197,7 +199,8 @@ class Trainer:
             "image_channels": self.image_channels,
             "z_sample": self.z_sample.data.cpu().numpy(),
             "total_time": self.total_time,
-            "batch_size_schedule": self.batch_size_schedule
+            "batch_size_schedule": self.batch_size_schedule,
+            "transition_iters":  self.transition_iters
 
         }
         save_checkpoint(state_dict,
@@ -228,11 +231,13 @@ class Trainer:
             # Logging variables
             # Transition settings
             self.transition_variable = ckpt["transition_variable"]
-            self.transition_iters = 8e5 // ckpt["batch_size"] * ckpt["batch_size"]
+            #self.transition_iters = ckpt["transition_iters"]
+            self.transition_iters = 12e5 // ckpt["batch_size"] * ckpt["batch_size"]
             self.is_transitioning = ckpt["is_transitioning"]
             self.transition_step = ckpt["transition_step"]
             self.global_step = ckpt["global_step"]
-            self.total_time = ckpt["total_time"]
+            #self.total_time = ckpt["total_time"]
+            self.start_time = time.time() - ckpt["total_time"] * 60
             
             current_channels = ckpt["start_channel_size"]
             self.transition_channels = [
@@ -258,7 +263,7 @@ class Trainer:
             self.g_optimizer.load_state_dict(ckpt['g_optimizer'])
             
             return True
-        except Exception as e:
+        except KeyError as e:
             print(e)
             print(' [*] No checkpoint!')
             labels = torch.arange(0, options.label_size).repeat(100 // options.label_size)[:100].view(-1, 1) if options.label_size > 0 else None
