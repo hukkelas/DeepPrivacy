@@ -4,7 +4,7 @@ from torch.autograd import Variable
 import torchvision
 import utils
 from utils import init_weights, load_checkpoint, save_checkpoint, to_cuda
-from models import Generator, Discriminator, get_transition_value
+from unet_model import Generator, Discriminator, get_transition_value
 import tqdm
 from torchsummary import summary
 import os
@@ -173,6 +173,12 @@ class Trainer:
         self.label_criterion = torch.nn.CrossEntropyLoss(reduction='none')
         self.discriminator.update_transition_value(self.transition_variable)
         self.generator.update_transition_value(self.transition_variable)
+        for i in range(3):
+            self.discriminator.extend(self.noise_dim)
+        self.discriminator.summary()
+        o = self.discriminator(self.z_sample)
+        self.data_loader = load_dataset(self.dataset, self.batch_size, 32)
+        #print("DISC OUT:" , o[0].shape)
 
     def save_checkpoint(self, epoch):
         filename = "step_{}.ckpt".format(self.global_step)
@@ -263,7 +269,7 @@ class Trainer:
             self.g_optimizer.load_state_dict(ckpt['g_optimizer'])
             
             return True
-        except KeyError as e:
+        except Exception as e:
             print(e)
             print(' [*] No checkpoint!')
             labels = torch.arange(0, options.label_size).repeat(100 // options.label_size)[:100].view(-1, 1) if options.label_size > 0 else None
@@ -273,7 +279,7 @@ class Trainer:
             return False
     
     def generate_noise(self, batch_size, labels):
-        z = Variable(torch.randn(batch_size, self.noise_dim))
+        z = Variable(torch.randn(batch_size, 1, 32, 32))
         if self.label_size > 0:
             assert labels.shape[0] == batch_size, "Label size: {}, batch size: {}".format(labels.shape, batch_size)
             labels_onehot = torch.zeros((batch_size, self.label_size))
@@ -281,7 +287,7 @@ class Trainer:
             labels_onehot[idx, labels.long().squeeze()] = 1
             assert labels_onehot.sum() == batch_size, "Was : {} expected:{}".format(labels_onehot.sum(), batch_size) 
             
-            z[:, :self.label_size] = labels_onehot
+            z[:, 0, :self.label_size, 0] = labels_onehot
         z = to_cuda(z)
         return z
     
@@ -311,7 +317,7 @@ class Trainer:
     
     def train(self):
         for epoch in range(self.start_epoch, self.num_epochs):
-            for i, (real_data, labels) in enumerate(self.data_loader):
+            for i, (real_data, labels) in tqdm.tqdm(enumerate(self.data_loader)):
                 batch_start_time = time.time()
                 self.generator.train()
                 labels = to_cuda(Variable(labels))
