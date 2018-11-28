@@ -158,22 +158,24 @@ class Generator(nn.Module):
         self.to_rgb_new = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
         self.to_rgb_old = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
         # self.to_rgb = EqualizedConv2D(start_channel_dim+image_channels, self.image_channels, 1, 0)
-        self.core_down = nn.Sequential(
-            UnetDownSamplingBlock(start_channel_dim, start_channel_dim, True),
-        )
-        self.core_up = nn.Sequential(
-            UnetUpsamplingBlock(start_channel_dim + self.z_channel, start_channel_dim, True)
-        )
+        self.core_blocks_down = nn.ModuleList([
+            to_cuda(UnetDownSamplingBlock(start_channel_dim, start_channel_dim, True)),
+        ])
+        self.core_blocks_up = nn.ModuleList([
+            to_cuda(UnetUpsamplingBlock(start_channel_dim + self.z_channel, start_channel_dim, True))
+        ])
         self.new_up = nn.Sequential()
         self.old_up = nn.Sequential()
         self.new_down = nn.Sequential()
         self.from_rgb_new = to_cuda(conv_module(self.image_channels, start_channel_dim, 1, 0))
         self.from_rgb_old = to_cuda(conv_module(self.image_channels, start_channel_dim, 1, 0)) # Should be conv_bn_relu
-        self.to_rgb = to_cuda(EqualizedConv2D(self.image_channels*2, self.image_channels, 3, 1))
+        self.to_rgb = to_cuda(EqualizedConv2D(self.image_channels*2, self.image_channels, 1, 0))
         self.current_imsize = 4
+        self.upsampling = UpSamplingBlock()
 
     
     def extend(self, output_dim):
+        #print("extending G")
         # Downsampling module
         self.current_imsize *= 2
         input_dim = self.to_rgb_new.input_dim
@@ -181,8 +183,10 @@ class Generator(nn.Module):
             nn.AvgPool2d([2,2]),
             self.from_rgb_new
         )
-        core_modules = list(self.new_down.children()) + list(self.core_down.children())
-        self.core_down = nn.Sequential(*core_modules)
+        if self.current_imsize > 8:
+            self.core_blocks_down.append(self.new_down)
+            self.core_blocks_up.append(self.new_up)
+
         self.from_rgb_new = to_cuda(conv_module(self.image_channels, output_dim, 1, 0))
         self.new_down = nn.Sequential(
             UnetDownSamplingBlock(output_dim, input_dim, True),
@@ -193,11 +197,9 @@ class Generator(nn.Module):
         self.to_rgb_old = self.to_rgb_new
         self.to_rgb_new = to_cuda(EqualizedConv2D(output_dim, self.image_channels, 1, 0))
         self.to_rgb_new = to_cuda(self.to_rgb_new)
-        core_modules = list(self.core_up.children()) + list(self.new_up.children()) + [UpSamplingBlock()]
-        #self.up = UpSamplingBlock()
-        self.core_up = nn.Sequential(*core_modules)
+
         self.new_up = to_cuda(nn.Sequential(
-            UnetUpsamplingBlock(input_dim, output_dim, True)
+            UnetUpsamplingBlock(input_dim + output_dim, output_dim, True)
         ))
 
         
@@ -205,29 +207,36 @@ class Generator(nn.Module):
     # x: Bx1x1x512
     def forward(self, x_in, z):
         old_down = self.from_rgb_old(x_in)
-        self.od = old_down
         new_down = self.from_rgb_new(x_in)
-        self.nd = new_down
         new_down = self.new_down(new_down)
         #print("Trans value:", self.transition_value)
         x = get_transition_value(old_down, new_down, self.transition_value)
-        self.pre = x
-        x = self.core_down(x)
+        out_down = [x]
+        for block in self.core_blocks_down:
+            x = block(x)
+            out_down.append(x)
         z = z.view(z.shape[0], self.z_channel, 4, 4)
         x = torch.cat((x,z), dim=1)
-        self.encoding = x
-        x = self.core_up(x)
-        self.x_core = x  
-        #x = self.up(x)
-        x_old = self.to_rgb_old(x)
+        x = self.core_blocks_up[0](x)
+        
+        for i, block in enumerate(self.core_blocks_up[1:]):
+            x = torch.cat((x, out_down[-i-1]), dim=1)
+            x = self.upsampling(x)
+            x = block(x)
+        if self.current_imsize > 4:
+            x_old = self.upsampling(x)
+            x = torch.cat((x, out_down[0]), dim=1)
+            x = self.upsampling(x)   
+            x_old = self.to_rgb_old(x_old)
+        else:
+            x_old = self.to_rgb_old(x)
+     
         x_new = self.new_up(x)
         x_new = self.to_rgb_new(x_new)
-        self.old = x_old
-        self.new = x_new
-             
+        #print(x_new.shape, x_old.shape)
+
         x = get_transition_value(x_old, x_new, self.transition_value)
         x = torch.cat((x, x_in), dim=1)
-        self.before = x
         x = self.to_rgb(x)
         return x
 
