@@ -70,6 +70,7 @@ class EqualizedConv2D(nn.Module):
         #self.conv.apply(init_weights)
         #self.conv.bias.data = self.conv.bias.data.zero_() 
         #self.conv = nn.utils.weight_norm(self.conv)
+
         self.wscale_layer = WSConv2d(in_dim, out_dim, kernel_size, 1, padding)
         #self.conv = self.wscale_layer.conv
         self.output_dim = out_dim
@@ -91,6 +92,7 @@ def conv_bn_relu(in_dim, out_dim, kernel_size, padding=0):
 
 
 def get_transition_value(x_old, x_new, transition_variable):
+    assert x_old.shape == x_new.shape
     return (1-transition_variable) * x_old + transition_variable*x_new
 
 class PixelwiseNormalization(nn.Module):
@@ -132,16 +134,11 @@ class UnetUpsamplingBlock(nn.Module):
       conv_bn_relu(in_dim, out_dim, 3, 1),
       conv_bn_relu(out_dim, out_dim, 3, 1) # This is wrong for the last block
     ]
-    self.upsampling_block = UpSamplingBlock()
-    
+    if not first_block:
+        modules = [UpSamplingBlock()] + modules
     self.model = nn.Sequential(*modules)
-    self.first_block = first_block
   
-  def forward(self, x, skip_x):
-    if not self.first_block:
-      x = self.upsampling_block(x)
-      assert x.shape == skip_x.shape, "Shape of X: {}, skip shape: {}".format(x.shape, skip_x.shape)
-      x += skip_x
+  def forward(self, x):
     x = self.model(x)
     return x
 
@@ -156,52 +153,92 @@ class Generator(nn.Module):
         # Transition blockss
         self.image_channels = image_channels
         self.noise_dim = noise_dim
+        self.z_channel = noise_dim // 4 // 4
+        self.transition_value = 1.0
         self.to_rgb_new = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
         self.to_rgb_old = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
-        self.down_sampling_blocks = [
-          UnetDownSamplingBlock(image_channels, start_channel_dim, True).cuda(),
-          UnetDownSamplingBlock(start_channel_dim, start_channel_dim, False),
-          UnetDownSamplingBlock(start_channel_dim, start_channel_dim, False),
-          UnetDownSamplingBlock(start_channel_dim, start_channel_dim, False),
-        ]
-        
-        self.upsampling_blocks = [
-          UnetUpsamplingBlock(start_channel_dim, start_channel_dim, True),
-          UnetUpsamplingBlock(start_channel_dim, start_channel_dim, False),
-          UnetUpsamplingBlock(start_channel_dim, start_channel_dim, False),
-          UnetUpsamplingBlock(start_channel_dim, image_channels, False),
-        ]
-        for block in self.down_sampling_blocks + self.upsampling_blocks:
-          to_cuda(block)
+        # self.to_rgb = EqualizedConv2D(start_channel_dim+image_channels, self.image_channels, 1, 0)
+        self.core_down = nn.Sequential(
+            UnetDownSamplingBlock(start_channel_dim, start_channel_dim, True),
+        )
+        self.core_up = nn.Sequential(
+            UnetUpsamplingBlock(start_channel_dim + self.z_channel, start_channel_dim, True)
+        )
+        self.new_up = nn.Sequential()
+        self.old_up = nn.Sequential()
+        self.new_down = nn.Sequential()
+        self.from_rgb_new = to_cuda(conv_module(self.image_channels, start_channel_dim, 1, 0))
+        self.from_rgb_old = to_cuda(conv_module(self.image_channels, start_channel_dim, 1, 0)) # Should be conv_bn_relu
+        self.to_rgb = to_cuda(EqualizedConv2D(self.image_channels*2, self.image_channels, 3, 1))
+        self.current_imsize = 4
+
     
     def extend(self, output_dim):
-      return
-        #self.to_rgb_new.apply(init_weights)
+        # Downsampling module
+        self.current_imsize *= 2
+        input_dim = self.to_rgb_new.input_dim
+        self.from_rgb_old = nn.Sequential(
+            nn.AvgPool2d([2,2]),
+            self.from_rgb_new
+        )
+        core_modules = list(self.new_down.children()) + list(self.core_down.children())
+        self.core_down = nn.Sequential(*core_modules)
+        self.from_rgb_new = to_cuda(conv_module(self.image_channels, output_dim, 1, 0))
+        self.new_down = nn.Sequential(
+            UnetDownSamplingBlock(output_dim, input_dim, True),
+            nn.AvgPool2d(2)
+        )
+        self.new_down = to_cuda(self.new_down)
+        # Upsampling modules
+        self.to_rgb_old = self.to_rgb_new
+        self.to_rgb_new = to_cuda(EqualizedConv2D(output_dim, self.image_channels, 1, 0))
+        self.to_rgb_new = to_cuda(self.to_rgb_new)
+        core_modules = list(self.core_up.children()) + list(self.new_up.children()) + [UpSamplingBlock()]
+        #self.up = UpSamplingBlock()
+        self.core_up = nn.Sequential(*core_modules)
+        self.new_up = to_cuda(nn.Sequential(
+            UnetUpsamplingBlock(input_dim, output_dim, True)
+        ))
 
+        
 
     # x: Bx1x1x512
-    def forward(self, x_in):
-      downsampling_outputs = [x_in]
-      for block in self.down_sampling_blocks:
-        #print("en")
-        x = block(downsampling_outputs[-1])
-        downsampling_outputs += [x]
-      #print([x.shape for x in downsampling_outputs])
-      #print(len(self.upsampling_blocks))
-      for i, block in enumerate(self.upsampling_blocks):
-        #print(i)
-        x = block(x, downsampling_outputs[-i-1])
-        #print(x.shape)
-      assert x.shape == x_in.shape
-      return x + x_in
+    def forward(self, x_in, z):
+        old_down = self.from_rgb_old(x_in)
+        self.od = old_down
+        new_down = self.from_rgb_new(x_in)
+        self.nd = new_down
+        new_down = self.new_down(new_down)
+        #print("Trans value:", self.transition_value)
+        x = get_transition_value(old_down, new_down, self.transition_value)
+        self.pre = x
+        x = self.core_down(x)
+        z = z.view(z.shape[0], self.z_channel, 4, 4)
+        x = torch.cat((x,z), dim=1)
+        self.encoding = x
+        x = self.core_up(x)
+        self.x_core = x  
+        #x = self.up(x)
+        x_old = self.to_rgb_old(x)
+        x_new = self.new_up(x)
+        x_new = self.to_rgb_new(x_new)
+        self.old = x_old
+        self.new = x_new
+             
+        x = get_transition_value(x_old, x_new, self.transition_value)
+        x = torch.cat((x, x_in), dim=1)
+        self.before = x
+        x = self.to_rgb(x)
+        return x
+
     
     def summary(self):
         print("="*80)
         print("GENERATOR")
-        summary(self, (self.noise_dim, 1, 1))
+        #summary(self, (self.image_channels, self.current_imsize, self.current_imsize))
 
 
-def conv_module(dim_in, dim_out, kernel_size, padding, image_width):
+def conv_module(dim_in, dim_out, kernel_size, padding, image_width=None):
     return nn.Sequential(
         EqualizedConv2D(dim_in, dim_out, kernel_size, padding),
         nn.LeakyReLU(negative_slope=.2)
@@ -219,9 +256,9 @@ class Discriminator(nn.Module):
         self.label_size = label_size
         self.image_channels = in_channels
         self.current_input_imsize = 4
-        self.from_rgb_new = conv_module(in_channels, start_channel_dim, 1, 0, self.current_input_imsize)
+        self.from_rgb_new = conv_module(in_channels*2, start_channel_dim, 1, 0, self.current_input_imsize)
 
-        self.from_rgb_old = conv_module(in_channels, start_channel_dim, 1, 0, self.current_input_imsize)
+        self.from_rgb_old = conv_module(in_channels*2, start_channel_dim, 1, 0, self.current_input_imsize)
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
             MinibatchStdLayer(),
@@ -250,7 +287,7 @@ class Discriminator(nn.Module):
             nn.AvgPool2d([2,2]),
             self.from_rgb_new
         )
-        self.from_rgb_new = conv_module(self.image_channels, input_dim, 1, 0,self.current_input_imsize)
+        self.from_rgb_new = conv_module(self.image_channels*2, input_dim, 1, 0,self.current_input_imsize)
         self.from_rgb_new = to_cuda(self.from_rgb_new)
         self.new_block = nn.Sequential(
             conv_module(input_dim, input_dim, 3, 1, self.current_input_imsize),
@@ -264,7 +301,8 @@ class Discriminator(nn.Module):
 
 
     # x: Bx1x1x512
-    def forward(self, x):
+    def forward(self, x, condition):
+        x = torch.cat((x, condition), dim=1)
         x_old = self.from_rgb_old(x)
         x_new = self.from_rgb_new(x)
         x_new = self.new_block(x_new)
@@ -278,8 +316,8 @@ class Discriminator(nn.Module):
     
     def summary(self):
         print("="*80)
-        print("GENERATOR")
-        summary(self, (self.image_channels, self.current_input_imsize, self.current_input_imsize))
+        print("DISCRIMINATOR")
+        #summary(self, (self.image_channels, self.current_input_imsize, self.current_input_imsize))
 
 
 if __name__ == "__main__":

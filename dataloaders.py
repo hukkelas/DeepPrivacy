@@ -4,6 +4,7 @@ import torch
 import os
 import numpy as np
 import utils
+import glob
 
 def load_mnist(batch_size, imsize=32):
     transform = [
@@ -13,7 +14,6 @@ def load_mnist(batch_size, imsize=32):
         transform +=  [transforms.Resize([imsize, imsize])]
     transform += [
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5], std=[0.5])
     ]
     transform = transforms.Compose(transform)
     imagenet_data = datasets.MNIST('data/mnist_data', 
@@ -67,7 +67,6 @@ def load_pokemon(batch_size, imsize=96):
 
 def load_celeba(batch_size, imsize=128):
     return CelebAGenerator("data/celebahq_torch", imsize, batch_size)
-    
 class CelebAGenerator:
 
     def __init__(self, dirpath, imsize, batch_size):
@@ -108,3 +107,57 @@ class CelebAGenerator:
 
     
 
+
+def load_torch_files(dirpath):
+    images = []
+    files = glob.glob(os.path.join(dirpath, "*.torch"))
+    assert len(files) > 0, "Empty directory: " + dirpath
+    for fpath in files:
+        assert os.path.isfile(fpath), "Is not file: " + fpath
+        ims = torch.load(fpath)
+        assert ims.dtype == torch.float32, "Was: {}".format(ims.dtype)
+        images.append(ims)
+    images = torch.cat(images, dim=0)
+    return images
+
+
+def load_celeba_condition(batch_size, imsize=128):
+    return ConditionedCelebADataset("data/celeba_torch", imsize, batch_size)
+    
+class ConditionedCelebADataset:
+
+    def __init__(self, dirpath, imsize, batch_size):
+        self.images = load_torch_files(os.path.join(dirpath, "original", str(imsize)))
+        self.conditional_images = load_torch_files(os.path.join(dirpath, "anonymized", str(imsize)))
+        assert self.images.shape == self.conditional_images.shape
+        expected_shape = (3, imsize, imsize)
+        assert self.images.shape[1:] == expected_shape, "Shape was: {}. Expected: {}".format(self.images.shape[1:], expected_shape)
+        print("Dataset loaded. Number of samples:", self.images.shape)
+        self.n_samples = self.images.shape[0]
+        self.batch_size = batch_size
+        self.indices = torch.LongTensor(self.batch_size)
+        self.ones = torch.ones(self.batch_size, dtype=torch.long)
+        self.max = self.n_samples // self.batch_size
+
+    
+    def __len__(self):
+        return self.images.shape[0]
+
+    def __iter__(self):
+        self.n = 0
+        return self
+    
+    def __next__(self):
+        if self.n > self.max:
+            raise StopIteration
+        self.n += 1
+        indices = self.indices.random_(0, self.n_samples)
+        images = self.images[indices]
+        condition = self.conditional_images[indices]
+        to_flip = torch.rand(self.batch_size) > 0.5
+        try:
+            images[to_flip] = utils.flip_horizontal(images[to_flip])
+            condition[to_flip] = utils.flip_horizontal(condition[to_flip])
+        except:
+            print("failed")
+        return images, condition
