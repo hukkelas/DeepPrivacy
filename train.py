@@ -418,7 +418,8 @@ class Trainer:
                         self.generator.update_transition_value(self.transition_variable)
                         z_sample = next(iter(self.data_loader))[1]
                         z_sample = preprocess_images(z_sample, self.transition_variable)
-                        fake_data_sample = normalize_img(self.generator(z_sample, self.z_sample).data)
+                        z = self.generate_noise(z_sample.shape[0], None)
+                        fake_data_sample = normalize_img(self.generator(z_sample, z).data)
                         os.makedirs("lol", exist_ok=True)
                         filepath = os.path.join("lol", "test.jpg")
                         torchvision.utils.save_image(fake_data_sample[:100], filepath, nrow=10)

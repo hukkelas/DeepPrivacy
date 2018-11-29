@@ -172,24 +172,27 @@ class Generator(nn.Module):
         self.to_rgb = to_cuda(EqualizedConv2D(self.image_channels*2, self.image_channels, 1, 0))
         self.current_imsize = 4
         self.upsampling = UpSamplingBlock()
+        self.prev_channel_size = start_channel_dim
 
     
     def extend(self, output_dim):
-        #print("extending G")
+        print("extending G")
         # Downsampling module
         self.current_imsize *= 2
-        input_dim = self.to_rgb_new.input_dim
         self.from_rgb_old = nn.Sequential(
             nn.AvgPool2d([2,2]),
             self.from_rgb_new
         )
         if self.current_imsize > 8:
-            self.core_blocks_down.append(self.new_down)
+            core_blocks_down = nn.ModuleList()
+            core_blocks_down.append(self.new_down)
+            core_blocks_down.extend(self.core_blocks_down)
+            self.core_blocks_down = core_blocks_down
             self.core_blocks_up.append(self.new_up)
 
         self.from_rgb_new = to_cuda(conv_module(self.image_channels, output_dim, 1, 0))
         self.new_down = nn.Sequential(
-            UnetDownSamplingBlock(output_dim, input_dim, True),
+            UnetDownSamplingBlock(output_dim, self.prev_channel_size, True),
             nn.AvgPool2d(2)
         )
         self.new_down = to_cuda(self.new_down)
@@ -199,8 +202,9 @@ class Generator(nn.Module):
         self.to_rgb_new = to_cuda(self.to_rgb_new)
 
         self.new_up = to_cuda(nn.Sequential(
-            UnetUpsamplingBlock(input_dim + output_dim, output_dim, True)
+            UnetUpsamplingBlock(self.prev_channel_size*2, output_dim, True)
         ))
+        self.prev_channel_size = output_dim
 
         
 
@@ -220,7 +224,7 @@ class Generator(nn.Module):
         x = self.core_blocks_up[0](x)
         
         for i, block in enumerate(self.core_blocks_up[1:]):
-            x = torch.cat((x, out_down[-i-1]), dim=1)
+            x = torch.cat((x, out_down[-i-2]), dim=1)
             x = self.upsampling(x)
             x = block(x)
         if self.current_imsize > 4:
