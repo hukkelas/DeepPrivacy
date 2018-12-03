@@ -11,6 +11,7 @@ import os
 from dataloaders import load_mnist, load_cifar10, load_pokemon, load_celeba, load_celeba_condition
 from options import load_options, print_options
 import time
+import numpy as np
 torch.backends.cudnn.benchmark=True
 
 
@@ -279,6 +280,19 @@ class Trainer:
         return z
     
 
+    def adjust_lr(self):
+        lr_coeff = 1 - min(self.transition_variable*2, 1)
+        lr_coeff = np.exp(-lr_coeff*lr_coeff*5.0)
+        lr = self.learning_rate*lr_coeff
+        self.log_variable("stats/learning_rate", lr)
+        if lr != self.learning_rate:
+            for param_group in self.d_optimizer.param_groups:
+                param_group["lr"] = lr
+            for param_group in self.g_optimizer.param_groups:
+                param_group["lr"] = lr
+        
+
+
     def log_model_graphs(self):
         with tensorboardX.SummaryWriter(self.summaries_dir + "_generator") as w:
             dummy_input = to_cuda(torch.zeros((1, self.generator.model.noise_dim, 1, 1)))
@@ -303,15 +317,16 @@ class Trainer:
     
     def train(self):
         for epoch in range(self.start_epoch, self.num_epochs):
-            for i, (real_data, condition) in tqdm.tqdm(enumerate(self.data_loader)):
+            for i, (real_data, condition) in enumerate(self.data_loader):
                 batch_start_time = time.time()
                 self.generator.train()
+                self.adjust_lr()
                 self.global_step += 1 * self.batch_size
                 if self.is_transitioning:
                     self.transition_variable = ((self.global_step-1) % self.transition_iters) / self.transition_iters
                     self.discriminator.update_transition_value(self.transition_variable)
                     self.generator.update_transition_value(self.transition_variable)
-                    
+                
                 real_data = preprocess_images(real_data, self.transition_variable)
                 condition = preprocess_images(condition, self.transition_variable)
                 z = self.generate_noise(real_data.shape[0], None)
@@ -328,11 +343,10 @@ class Trainer:
                 epsilon_penalty = (real_scores ** 2).squeeze()
 
                 # Label loss penalty
-                label_penalty_discriminator = to_cuda(torch.Tensor([0]))
 
-                assert wasserstein_distance.shape == gradient_pen.shape
+                #assert wasserstein_distance.shape == gradient_pen.shape
                 assert wasserstein_distance.shape == epsilon_penalty.shape
-                D_loss = -wasserstein_distance + gradient_pen * 10 + epsilon_penalty * 0.001 + label_penalty_discriminator
+                D_loss = -wasserstein_distance + gradient_pen * 10 + epsilon_penalty * 0.001
 
 
                 D_loss = D_loss.mean()
@@ -343,12 +357,10 @@ class Trainer:
 
                 # Forward G
                 fake_scores, fake_logits = self.discriminator(fake_data, condition)
-                
-                # Label loss penalty
-                label_penalty_generator = self.label_criterion(fake_logits, labels).squeeze() if self.label_size > 0 else to_cuda(torch.Tensor([0]))
+
         
                 
-                G_loss = (-fake_scores + label_penalty_generator).mean()
+                G_loss = (-fake_scores ).mean()
                 #G_loss = (-fake_scores).mean()
                 self.d_optimizer.zero_grad()
                 self.g_optimizer.zero_grad()
@@ -367,14 +379,12 @@ class Trainer:
                 self.log_variable("stats/transition-value", self.transition_variable)
                 self.log_variable("stats/nsec_per_img", nsec_per_img)
                 self.log_variable("stats/training_time_minutes", self.total_time)
-                self.log_variable("discriminator/label-penalty", label_penalty_discriminator.mean())
-                self.log_variable("generator/label-penalty", label_penalty_generator.mean())
 
 
                 if (self.global_step) % (self.batch_size*500) == 0:
                     self.generator.eval()
                     print(os.system("nvidia-smi"))
-                    fake_data_sample = normalize_img(self.generator(condition, z).data)
+                    fake_data_sample = normalize_img(self.generator(condition, z).detach().data)
                     save_images(self.writer, fake_data_sample, self.global_step, self.generated_data_dir)
 
                     # Save input images
@@ -409,6 +419,7 @@ class Trainer:
 
                         
                         self.discriminator.summary(), self.generator.summary()
+                        del self.data_loader
                         self.data_loader = load_dataset(self.dataset, self.batch_size, self.current_imsize)
                         self.is_transitioning = True
 

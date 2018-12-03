@@ -78,3 +78,19 @@ def flip_horizontal(images):
     # Flip on -1 dimension
     idx = torch.arange(images.shape[-1] -1, -1, -1 ,dtype=torch.long)
     return images[:, :, :, idx]
+
+
+
+def _rampup(epoch, rampup_length):
+    if epoch < rampup_length:
+        p = max(0.0, float(epoch)) / float(rampup_length)
+        p = 1.0 - p
+        return np.exp(-p*p*5.0)
+    else:
+        return 1.0
+
+def _rampdown_linear(epoch, num_epochs, rampdown_length):
+    if epoch >= num_epochs - rampdown_length:
+        return float(num_epochs - epoch) / rampdown_length
+    else:
+        return 1.0

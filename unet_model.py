@@ -37,7 +37,7 @@ class WSConv2d(nn.Module):
     def __init__(self, inCh, outCh, kernelSize, stride, padding, gain=np.sqrt(2)):
         super().__init__()
         self.conv = nn.Conv2d(in_channels=inCh, out_channels=outCh, kernel_size=kernelSize, stride=stride, padding=padding)
-        
+        #nn.utils.spectral_norm(self.conv)
         # new bias to use after wscale
         self.bias = self.conv.bias
         self.conv.bias = None
@@ -50,16 +50,33 @@ class WSConv2d(nn.Module):
         # init
         nn.init.normal_(self.conv.weight)
         nn.init.constant_(self.bias, val=0)
-        
+        #nn.init.xavier_normal_(self.conv.weight)
         self.name = '(inp = %s)' % (self.conv.__class__.__name__ + str(convShape))
         
     def forward(self, x):
+        #return self.conv(x)
         return self.conv(x) * self.wtScale + self.bias.view(1, self.bias.shape[0], 1, 1)
 
     def __repr__(self):
         return self.__class__.__name__ + self.name
 
-        
+class WSLinear(nn.Module):
+
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.linear = nn.Linear(in_dim, out_dim)
+        self.bias = self.linear.bias
+        self.linear.bias = None
+        fanIn = in_dim
+        self.wtScale = np.sqrt(2) / np.sqrt(fanIn)
+
+        nn.init.normal_(self.linear.weight)
+        nn.init.constant_(self.bias, val=0)
+
+    
+    def forward(self, x):
+        return self.linear(x) * self.wtScale + self.bias
+    
 class EqualizedConv2D(nn.Module):
 
     def __init__(self, in_dim, out_dim, kernel_size, padding):
@@ -117,6 +134,7 @@ class UnetDownSamplingBlock(nn.Module):
 
     modules = [
       conv_bn_relu(in_dim, out_dim, 3, 1),
+      #nn.Dropout2d(0.1)
     ]
     if not first_block:
       modules = [nn.MaxPool2d(2, 2)] + modules
@@ -131,6 +149,7 @@ class UnetUpsamplingBlock(nn.Module):
     super(UnetUpsamplingBlock, self).__init__()
 
     modules = [
+      nn.Dropout2d(0.1),
       conv_bn_relu(in_dim, out_dim, 3, 1),
       conv_bn_relu(out_dim, out_dim, 3, 1) # This is wrong for the last block
     ]
@@ -158,17 +177,17 @@ class Generator(nn.Module):
         self.to_rgb_new = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
         self.to_rgb_old = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
         # self.to_rgb = EqualizedConv2D(start_channel_dim+image_channels, self.image_channels, 1, 0)
-        self.core_blocks_down = nn.ModuleList([
+        self.core_blocks_down = nn.Sequential(
             to_cuda(UnetDownSamplingBlock(start_channel_dim, start_channel_dim, True)),
-        ])
-        self.core_blocks_up = nn.ModuleList([
-            to_cuda(UnetUpsamplingBlock(start_channel_dim + self.z_channel, start_channel_dim, True))
-        ])
+        )
+        self.core_blocks_up = nn.Sequential(
+            to_cuda(UnetUpsamplingBlock(start_channel_dim, start_channel_dim, True))
+        )
         self.new_up = nn.Sequential()
         self.old_up = nn.Sequential()
         self.new_down = nn.Sequential()
-        self.from_rgb_new = to_cuda(conv_module(self.image_channels, start_channel_dim, 1, 0))
-        self.from_rgb_old = to_cuda(conv_module(self.image_channels, start_channel_dim, 1, 0)) # Should be conv_bn_relu
+        self.from_rgb_new = to_cuda(conv_bn_relu(self.image_channels, start_channel_dim, 1, 0))
+        self.from_rgb_old = to_cuda(conv_bn_relu(self.image_channels, start_channel_dim, 1, 0)) # Should be conv_bn_relu
         self.to_rgb = to_cuda(EqualizedConv2D(self.image_channels*2, self.image_channels, 1, 0))
         self.current_imsize = 4
         self.upsampling = UpSamplingBlock()
@@ -183,14 +202,17 @@ class Generator(nn.Module):
             nn.AvgPool2d([2,2]),
             self.from_rgb_new
         )
-        if self.current_imsize > 8:
-            core_blocks_down = nn.ModuleList()
-            core_blocks_down.append(self.new_down)
-            core_blocks_down.extend(self.core_blocks_down)
-            self.core_blocks_down = core_blocks_down
-            self.core_blocks_up.append(self.new_up)
 
-        self.from_rgb_new = to_cuda(conv_module(self.image_channels, output_dim, 1, 0))
+        core_blocks_down = []
+        core_blocks_down.append(self.new_down)
+        for block in self.core_blocks_down.children():
+            core_blocks_down.append(block)
+
+        self.core_blocks_down = nn.Sequential(*core_blocks_down)
+        core_blocks_up = list(self.core_blocks_up.children()) + list(self.new_up.children()) + [UpSamplingBlock()]
+        self.core_blocks_up = nn.Sequential(*core_blocks_up)
+
+        self.from_rgb_new = to_cuda(conv_bn_relu(self.image_channels, output_dim, 1, 0))
         self.new_down = nn.Sequential(
             UnetDownSamplingBlock(output_dim, self.prev_channel_size, True),
             nn.AvgPool2d(2)
@@ -202,38 +224,27 @@ class Generator(nn.Module):
         self.to_rgb_new = to_cuda(self.to_rgb_new)
 
         self.new_up = to_cuda(nn.Sequential(
-            UnetUpsamplingBlock(self.prev_channel_size*2, output_dim, True)
+            UnetUpsamplingBlock(self.prev_channel_size, output_dim, True)
+            
         ))
         self.prev_channel_size = output_dim
 
         
 
     # x: Bx1x1x512
-    def forward(self, x_in, z):
+    def forward(self, x_in, z, dropout_rate=0.5):
         old_down = self.from_rgb_old(x_in)
         new_down = self.from_rgb_new(x_in)
         new_down = self.new_down(new_down)
         #print("Trans value:", self.transition_value)
         x = get_transition_value(old_down, new_down, self.transition_value)
-        out_down = [x]
-        for block in self.core_blocks_down:
-            x = block(x)
-            out_down.append(x)
-        z = z.view(z.shape[0], self.z_channel, 4, 4)
-        x = torch.cat((x,z), dim=1)
-        x = self.core_blocks_up[0](x)
-        
-        for i, block in enumerate(self.core_blocks_up[1:]):
-            x = torch.cat((x, out_down[-i-2]), dim=1)
-            x = self.upsampling(x)
-            x = block(x)
-        if self.current_imsize > 4:
-            x_old = self.upsampling(x)
-            x = torch.cat((x, out_down[0]), dim=1)
-            x = self.upsampling(x)   
-            x_old = self.to_rgb_old(x_old)
-        else:
-            x_old = self.to_rgb_old(x)
+        x = self.core_blocks_down(x)
+
+        #z = z.view(z.shape[0], self.z_channel, 4, 4)
+        #x = torch.cat((x,z), dim=1)
+        x = self.core_blocks_up(x)
+
+        x_old = self.to_rgb_old(x)
      
         x_new = self.new_up(x)
         x_new = self.to_rgb_new(x_new)
@@ -257,6 +268,13 @@ def conv_module(dim_in, dim_out, kernel_size, padding, image_width=None):
         nn.LeakyReLU(negative_slope=.2)
     )
 
+def conv_module_bn(dim_in, dim_out, kernel_size, padding, image_width=None):
+    return nn.Sequential(
+        EqualizedConv2D(dim_in, dim_out, kernel_size, padding),
+        nn.LeakyReLU(negative_slope=.2)
+    )
+
+
 class Discriminator(nn.Module):
 
     def __init__(self, 
@@ -269,16 +287,16 @@ class Discriminator(nn.Module):
         self.label_size = label_size
         self.image_channels = in_channels
         self.current_input_imsize = 4
-        self.from_rgb_new = conv_module(in_channels*2, start_channel_dim, 1, 0, self.current_input_imsize)
+        self.from_rgb_new = conv_module_bn(in_channels*2, start_channel_dim, 1, 0, self.current_input_imsize)
 
-        self.from_rgb_old = conv_module(in_channels*2, start_channel_dim, 1, 0, self.current_input_imsize)
+        self.from_rgb_old = conv_module_bn(in_channels*2, start_channel_dim, 1, 0, self.current_input_imsize)
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
             MinibatchStdLayer(),
-            conv_module(start_channel_dim+1, start_channel_dim, 3, 1, imsize),
-            conv_module(start_channel_dim, start_channel_dim, 4, 0, 1),            
+            conv_module_bn(start_channel_dim+1, start_channel_dim, 3, 1, imsize),
+            conv_module_bn(start_channel_dim, start_channel_dim, 4, 0, 1),            
         )
-        self.output_layer = nn.Linear(start_channel_dim, 1 + label_size)
+        self.output_layer = WSLinear(start_channel_dim, 1 + label_size)
         self.transition_value = 1.0
 
         
@@ -300,11 +318,11 @@ class Discriminator(nn.Module):
             nn.AvgPool2d([2,2]),
             self.from_rgb_new
         )
-        self.from_rgb_new = conv_module(self.image_channels*2, input_dim, 1, 0,self.current_input_imsize)
+        self.from_rgb_new = conv_module_bn(self.image_channels*2, input_dim, 1, 0,self.current_input_imsize)
         self.from_rgb_new = to_cuda(self.from_rgb_new)
         self.new_block = nn.Sequential(
-            conv_module(input_dim, input_dim, 3, 1, self.current_input_imsize),
-            conv_module(input_dim, output_dim, 3, 1, self.current_input_imsize),
+            conv_module_bn(input_dim, input_dim, 3, 1, self.current_input_imsize),
+            conv_module_bn(input_dim, output_dim, 3, 1, self.current_input_imsize),
             nn.AvgPool2d([2, 2])
         )
         self.new_block = to_cuda(self.new_block)
@@ -320,7 +338,9 @@ class Discriminator(nn.Module):
         x_new = self.from_rgb_new(x)
         x_new = self.new_block(x_new)
         x = get_transition_value(x_old, x_new, self.transition_value)
+        self.from_rgb = x
         x = self.core_model(x)
+        self.after_core = x
         x = x.view(x.shape[0], -1)
         x = self.output_layer(x)
         if self.label_size > 0:
