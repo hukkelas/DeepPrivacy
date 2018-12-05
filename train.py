@@ -283,7 +283,7 @@ class Trainer:
     def adjust_lr(self):
         lr_coeff = 1 - min(self.transition_variable*2, 1)
         lr_coeff = np.exp(-lr_coeff*lr_coeff*5.0)
-        lr = self.learning_rate*lr_coeff
+        lr = self.learning_rate
         self.log_variable("stats/learning_rate", lr)
         if lr != self.learning_rate:
             for param_group in self.d_optimizer.param_groups:
@@ -338,7 +338,7 @@ class Trainer:
                 fake_scores, fake_logits = self.discriminator(fake_data.detach(), condition)
 
                 wasserstein_distance = (real_scores - fake_scores).squeeze()  # Wasserstein-1 Distance
-                gradient_pen = gradient_penalty(real_data.data, fake_data.data, self.discriminator, condition)
+                gradient_pen = gradient_penalty(real_data.data, fake_data.detach(), self.discriminator, condition)
                 # Epsilon penalty
                 epsilon_penalty = (real_scores ** 2).squeeze()
 

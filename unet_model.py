@@ -6,7 +6,6 @@ from utils import to_cuda, init_weights
 from torchsummary import summary
 import numpy as np
 
-
 class MinibatchStdLayer(nn.Module):
 
     def __init__(self):
@@ -134,6 +133,7 @@ class UnetDownSamplingBlock(nn.Module):
 
     modules = [
       conv_bn_relu(in_dim, out_dim, 3, 1),
+      conv_bn_relu(out_dim, out_dim, 3, 1),
       #nn.Dropout2d(0.1)
     ]
     if not first_block:
@@ -177,12 +177,12 @@ class Generator(nn.Module):
         self.to_rgb_new = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
         self.to_rgb_old = EqualizedConv2D(start_channel_dim, self.image_channels, 1, 0)
         # self.to_rgb = EqualizedConv2D(start_channel_dim+image_channels, self.image_channels, 1, 0)
-        self.core_blocks_down = nn.Sequential(
+        self.core_blocks_down = nn.ModuleList([
             to_cuda(UnetDownSamplingBlock(start_channel_dim, start_channel_dim, True)),
-        )
-        self.core_blocks_up = nn.Sequential(
+        ])
+        self.core_blocks_up = nn.ModuleList([
             to_cuda(UnetUpsamplingBlock(start_channel_dim, start_channel_dim, True))
-        )
+        ])
         self.new_up = nn.Sequential()
         self.old_up = nn.Sequential()
         self.new_down = nn.Sequential()
@@ -192,30 +192,44 @@ class Generator(nn.Module):
         self.current_imsize = 4
         self.upsampling = UpSamplingBlock()
         self.prev_channel_size = start_channel_dim
+        self.downsampling = nn.AvgPool2d(2)
 
     
     def extend(self, output_dim):
+        print(self.current_imsize, "Output dim:", output_dim)
         print("extending G")
         # Downsampling module
         self.current_imsize *= 2
+        print(self.current_imsize, "Output dim:", output_dim)
+        with open("lol/textfile{}".format(self.current_imsize), "w") as f:
+            f.write("{}\n".format(self.current_imsize))
+            f.write(str(os.system("nvidia-smi")))
         self.from_rgb_old = nn.Sequential(
             nn.AvgPool2d([2,2]),
             self.from_rgb_new
         )
+        if self.current_imsize == 8:
+            core_block_up = nn.Sequential(
+                self.core_blocks_up[0],
+                UpSamplingBlock()
+            )
+            self.core_blocks_up = nn.ModuleList([core_block_up])
+        else:
+            core_blocks_down = nn.ModuleList()
 
-        core_blocks_down = []
-        core_blocks_down.append(self.new_down)
-        for block in self.core_blocks_down.children():
-            core_blocks_down.append(block)
+            core_blocks_down.append(self.new_down)
+            first = [nn.AvgPool2d(2)] + list(self.core_blocks_down[0].children()) # Add donwsampling to downsampling block
+            core_blocks_down.append(nn.Sequential(*first))
+            core_blocks_down.extend(self.core_blocks_down[1:])
 
-        self.core_blocks_down = nn.Sequential(*core_blocks_down)
-        core_blocks_up = list(self.core_blocks_up.children()) + list(self.new_up.children()) + [UpSamplingBlock()]
-        self.core_blocks_up = nn.Sequential(*core_blocks_up)
+            self.core_blocks_down = core_blocks_down
+            new_up_blocks = list(self.new_up.children()) + [UpSamplingBlock()]
+            self.new_up = nn.Sequential(*new_up_blocks)
+            self.core_blocks_up.append(self.new_up)
 
         self.from_rgb_new = to_cuda(conv_bn_relu(self.image_channels, output_dim, 1, 0))
         self.new_down = nn.Sequential(
-            UnetDownSamplingBlock(output_dim, self.prev_channel_size, True),
-            nn.AvgPool2d(2)
+            UnetDownSamplingBlock(output_dim, self.prev_channel_size, True)
         )
         self.new_down = to_cuda(self.new_down)
         # Upsampling modules
@@ -224,7 +238,7 @@ class Generator(nn.Module):
         self.to_rgb_new = to_cuda(self.to_rgb_new)
 
         self.new_up = to_cuda(nn.Sequential(
-            UnetUpsamplingBlock(self.prev_channel_size, output_dim, True)
+            UnetUpsamplingBlock(self.prev_channel_size*2, output_dim, True)
             
         ))
         self.prev_channel_size = output_dim
@@ -233,26 +247,38 @@ class Generator(nn.Module):
 
     # x: Bx1x1x512
     def forward(self, x_in, z, dropout_rate=0.5):
-        old_down = self.from_rgb_old(x_in)
-        new_down = self.from_rgb_new(x_in)
-        new_down = self.new_down(new_down)
-        #print("Trans value:", self.transition_value)
-        x = get_transition_value(old_down, new_down, self.transition_value)
-        x = self.core_blocks_down(x)
+        unet_skips = []
+        if self.current_imsize != 4:
+            old_down = self.from_rgb_old(x_in)
+            new_down = self.from_rgb_new(x_in)
+            new_down = self.new_down(new_down) 
+            unet_skips.append(new_down)
+            new_down = self.downsampling(new_down)
+            x = get_transition_value(old_down, new_down, self.transition_value)
+        else:
+            x = self.from_rgb_new(x_in)
+        
+        
+        for block in self.core_blocks_down[:-1]:
+            x = block(x)
+            unet_skips.append(x)
+        x = self.core_blocks_down[-1](x)
+        x = self.core_blocks_up[0](x)
 
-        #z = z.view(z.shape[0], self.z_channel, 4, 4)
-        #x = torch.cat((x,z), dim=1)
-        x = self.core_blocks_up(x)
-
+        for idx, block in enumerate(self.core_blocks_up[1:]):
+            skip_x = unet_skips[-idx-1]
+            assert skip_x.shape == x.shape, "IDX: {}, skip_x: {}, x: {}".format(idx, skip_x.shape, x.shape)
+            x = torch.cat((x, skip_x), dim=1)
+            x = block(x)
+        
+        if self.current_imsize == 4:
+            x = self.to_rgb_new(x)
+            return x
         x_old = self.to_rgb_old(x)
-     
+        x = torch.cat((x, unet_skips[0]), dim=1)
         x_new = self.new_up(x)
         x_new = self.to_rgb_new(x_new)
-        #print(x_new.shape, x_old.shape)
-
         x = get_transition_value(x_old, x_new, self.transition_value)
-        x = torch.cat((x, x_in), dim=1)
-        x = self.to_rgb(x)
         return x
 
     
