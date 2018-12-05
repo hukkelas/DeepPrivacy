@@ -94,3 +94,8 @@ def _rampdown_linear(epoch, num_epochs, rampdown_length):
         return float(num_epochs - epoch) / rampdown_length
     else:
         return 1.0
+
+
+def get_transition_value(x_old, x_new, transition_variable):
+    assert x_old.shape == x_new.shape
+    return (1-transition_variable) * x_old + transition_variable*x_new

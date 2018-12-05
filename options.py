@@ -82,10 +82,6 @@ def load_options():
             
     options, _ = parser.parse_args()
 
-    
-    options.label_size = 0
-    if options.dataset == "celeba" or options.dataset == "celeba_condition":
-        options.label_size = 0
 
     validate_start_channel_size(options.max_imsize, options.start_channel_size)
 
