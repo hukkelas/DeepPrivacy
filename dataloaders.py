@@ -138,6 +138,7 @@ class ConditionedCelebADataset:
         self.indices = torch.LongTensor(self.batch_size)
         self.ones = torch.ones(self.batch_size, dtype=torch.long)
         self.max = self.n_samples // self.batch_size
+        self.validation_size = int(self.n_samples*0.05)
 
     
     def __len__(self):
@@ -151,7 +152,7 @@ class ConditionedCelebADataset:
         if self.n > self.max:
             raise StopIteration
         self.n += 1
-        indices = self.indices.random_(0, self.n_samples)
+        indices = self.indices.random_(0, self.n_samples - self.validation_size)
         images = self.images[indices]
         condition = self.conditional_images[indices]
         to_flip = torch.rand(self.batch_size) > 0.5
@@ -161,3 +162,11 @@ class ConditionedCelebADataset:
         except:
             print("failed")
         return images, condition
+    
+    def validation_set_generator(self, shuffle=False):
+        validation_iters = self.validation_size // self.batch_size
+        validation_offset = self.n_samples - self.validation_size
+        for i in range(validation_iters):
+            start_idx = validation_offset + i*self.batch_size
+            end_idx = validation_offset + (i+1)*self.batch_size
+            yield self.images[start_idx:end_idx], self.conditional_images[start_idx:end_idx]

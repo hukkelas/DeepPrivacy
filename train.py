@@ -55,15 +55,12 @@ class DataParallellWrapper(torch.nn.Module):
 
 
 def init_model(imsize, noise_dim, start_channel_dim, image_channels):
-    discriminator = Discriminator(image_channels, imsize, start_channel_dim)
+    discriminator = Discriminator(image_channels, imsize, int(start_channel_dim*2**0.5))
     discriminator = DataParallellWrapper(discriminator)
     generator = Generator(noise_dim, start_channel_dim, image_channels)
     generator = DataParallellWrapper(generator)
     to_cuda([discriminator, generator])
-    #discriminator.apply(init_weights)
-    #generator.apply(init_weights)
-    #discriminator.summary()
-    #generator.summary()
+
     return discriminator, generator
 
 
@@ -163,6 +160,7 @@ class Trainer:
 
                 
         self.writer = tensorboardX.SummaryWriter(options.summaries_dir)
+        self.validation_writer = tensorboardX.SummaryWriter(os.path.join(options.summaries_dir, "validation"))
 
         
         print("CUDA AVAILABLE:", torch.cuda.is_available())
@@ -250,7 +248,7 @@ class Trainer:
                 ]
             self.discriminator, self.generator = init_model(self.current_imsize //(2**self.transition_step), self.noise_dim, current_channels, self.image_channels)
             for i in range(self.transition_step):
-                self.discriminator.extend(self.transition_channels[i])
+                self.discriminator.extend(int(self.transition_channels[i]*2**0.5))
                 self.generator.extend(self.transition_channels[i])
             self.discriminator.load_state_dict(ckpt['D'])
             self.generator.load_state_dict(ckpt['G'])
@@ -307,9 +305,39 @@ class Trainer:
         self.g_optimizer = torch.optim.Adam(self.generator.parameters(),
                                             lr=self.learning_rate, betas=(0.0, 0.999))
 
-    def log_variable(self, name, value):
-        self.writer.add_scalar(name, value, global_step=self.global_step)
+    def log_variable(self, name, value, log_to_validation=False):
+        if log_to_validation:
+            self.validation_writer.add_scalar(name, value, global_step=self.global_step)
+        else:
+            self.writer.add_scalar(name, value, global_step=self.global_step)
     
+
+    def validate_model(self):
+        real_scores = []
+        fake_scores = []
+        wasserstein_distances = []
+        epsilon_penalties = []
+        for images, condition in self.data_loader.validation_set_generator():
+            real_data = preprocess_images(images, self.transition_variable)
+            condition = preprocess_images(condition, self.transition_variable)
+            fake_data = self.generator(condition, None)
+            real_score, real_logits = self.discriminator(real_data, condition)
+            fake_score, fake_logits = self.discriminator(fake_data.detach(), condition)
+            wasserstein_distance = (real_score - fake_score).squeeze()
+            epsilon_penalty = (real_score**2).squeeze()
+            real_scores.append(real_score.mean().item())
+            fake_scores.append(fake_score.mean().item())
+            wasserstein_distances.append(wasserstein_distance.mean().item())
+            epsilon_penalties.append(epsilon_penalty.mean().item())
+        self.log_variable('discriminator/wasserstein-distance',np.mean(wasserstein_distances), True )
+        self.log_variable("discriminator/real-score", np.mean(real_scores), True)
+        self.log_variable("discriminator/fake-score", np.mean(fake_scores), True)
+        self.log_variable("discriminator/epsilon-penalty", np.mean(epsilon_penalties), True)
+        directory = os.path.join(self.generated_data_dir, "validation")
+        os.makedirs(directory, exist_ok=True)
+        save_images(self.validation_writer, normalize_img(fake_data), self.global_step, directory)
+
+
     def train(self):
         for epoch in range(self.start_epoch, self.num_epochs):
             for i, (real_data, condition) in enumerate(self.data_loader):
@@ -355,7 +383,7 @@ class Trainer:
         
                 
                 G_loss = (-fake_scores ).mean()
-                #G_loss = (-fake_scores).mean()
+
                 self.d_optimizer.zero_grad()
                 self.g_optimizer.zero_grad()
                 G_loss.backward()
@@ -387,11 +415,14 @@ class Trainer:
                     filepath = os.path.join(self.generated_data_dir, filename)
                     to_save = normalize_img(real_data)
                     torchvision.utils.save_image(to_save, filepath, nrow=10)
-                    imsize = real_data.shape[2]
+
                     filename = "condition{0}_{1}x{1}.jpg".format(self.global_step, imsize)
                     filepath = os.path.join(self.generated_data_dir, filename)
                     to_save = normalize_img(condition)
                     torchvision.utils.save_image(to_save, filepath, nrow=10)
+                if self.global_step % (self.batch_size*3000) == 0:
+                    self.validate_model()
+
                 if self.global_step % (self.batch_size * 1000) == 0:
                     self.save_checkpoint(epoch)
                 if self.global_step % self.transition_iters == 0:
@@ -405,7 +436,7 @@ class Trainer:
                         self.save_checkpoint(epoch)
                     elif self.current_imsize < self.max_imsize:
                         current_channels = self.transition_channels[self.transition_step]
-                        self.discriminator.extend(current_channels)
+                        self.discriminator.extend(int(current_channels*2**0.5))
                         self.generator.extend(current_channels)
                         self.current_imsize *= 2
 

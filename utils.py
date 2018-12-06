@@ -52,7 +52,8 @@ def save_checkpoint(state, save_path, is_best=False, max_keep=None):
         shutil.copyfile(save_path, os.path.join(save_dir, 'best_model.ckpt'))
 
 
-def load_checkpoint(ckpt_dir_or_file, map_location=None, load_best=False):
+def load_checkpoint(ckpt_dir_or_file, load_best=False):
+    map_location = None if torch.cuda.is_available() else "cpu"
     if os.path.isdir(ckpt_dir_or_file):
         if load_best:
             ckpt_path = os.path.join(ckpt_dir_or_file, 'best_model.ckpt')
