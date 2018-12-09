@@ -163,7 +163,7 @@ class ConditionedCelebADataset:
             print("failed")
         return images, condition
     
-    def validation_set_generator(self, shuffle=False):
+    def validation_set_generator(self):
         validation_iters = self.validation_size // self.batch_size
         validation_offset = self.n_samples - self.validation_size
         for i in range(validation_iters):

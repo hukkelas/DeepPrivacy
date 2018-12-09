@@ -124,6 +124,7 @@ class Trainer:
         self.num_epochs = options.num_epochs
         self.noise_dim = options.noise_dim
         self.learning_rate = options.learning_rate
+        self.running_average_generator_decay = options.running_average_generator_decay
 
         # Image settings
         self.current_imsize = options.imsize
@@ -156,9 +157,9 @@ class Trainer:
         if not self.load_checkpoint():
             self.discriminator, self.generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels)
             self.init_optimizers()
+            self.init_running_average_generator()
         self.data_loader = load_dataset(self.dataset, self.batch_size, self.current_imsize)
 
-                
         self.writer = tensorboardX.SummaryWriter(options.summaries_dir)
         self.validation_writer = tensorboardX.SummaryWriter(os.path.join(options.summaries_dir, "validation"))
 
@@ -197,7 +198,9 @@ class Trainer:
             "z_sample": self.z_sample.data.cpu().numpy(),
             "total_time": self.total_time,
             "batch_size_schedule": self.batch_size_schedule,
-            "transition_iters":  self.transition_iters
+            "transition_iters":  self.transition_iters,
+            "running_average_generator": self.running_average_generator.state_dict(),
+            "running_average_generator_decay": self.running_average_generator_decay
 
         }
         save_checkpoint(state_dict,
@@ -218,6 +221,7 @@ class Trainer:
             self.noise_dim = ckpt["noise_dim"]
             self.learning_rate = ckpt["learning_rate"]
             self.z_sample = to_cuda(torch.tensor(ckpt["z_sample"]))
+            self.running_average_generator_decay = ckpt["running_average_generator_decay"]
 
             # Image settings
             self.current_imsize = ckpt["current_imsize"]
@@ -247,11 +251,15 @@ class Trainer:
                 current_channels//32,
                 ]
             self.discriminator, self.generator = init_model(self.current_imsize //(2**self.transition_step), self.noise_dim, current_channels, self.image_channels)
+            self.init_running_average_generator()
             for i in range(self.transition_step):
                 self.discriminator.extend(int(self.transition_channels[i]*2**0.5))
                 self.generator.extend(self.transition_channels[i])
+                
+
             self.discriminator.load_state_dict(ckpt['D'])
             self.generator.load_state_dict(ckpt['G'])
+            self.running_average_generator.load_state_dict(ckpt["running_average_generator"])
             self.init_optimizers()
             self.generator.summary()
             self.discriminator.summary()            
@@ -271,6 +279,24 @@ class Trainer:
         z = Variable(torch.randn(batch_size, self.noise_dim))
         z = to_cuda(z)
         return z
+    
+    def init_running_average_generator(self):
+        self.running_average_generator = Generator(self.noise_dim, self.start_channel_size, self.image_channels)
+        self.running_average_generator = DataParallellWrapper(self.running_average_generator)
+        self.running_average_generator = to_cuda(self.running_average_generator)
+        for i in range(self.transition_step):
+            self.extend_running_average_generator(self.transition_channels[i])
+    
+
+    def extend_running_average_generator(self, current_channels):
+        g = self.running_average_generator
+        g.extend(current_channels)
+        
+    
+    def update_running_average_generator(self):
+        for avg_parameter, current_parameter in zip(self.running_average_generator.parameters(), self.generator.parameters()):
+            avg_parameter.data = self.running_average_generator_decay*avg_parameter + (1-self.running_average_generator_decay) * current_parameter
+
     
 
     def adjust_lr(self):
@@ -317,10 +343,11 @@ class Trainer:
         fake_scores = []
         wasserstein_distances = []
         epsilon_penalties = []
+        self.running_average_generator.eval()
         for images, condition in self.data_loader.validation_set_generator():
             real_data = preprocess_images(images, self.transition_variable)
             condition = preprocess_images(condition, self.transition_variable)
-            fake_data = self.generator(condition, None)
+            fake_data = self.running_average_generator(condition, None)
             real_score, real_logits = self.discriminator(real_data, condition)
             fake_score, fake_logits = self.discriminator(fake_data.detach(), condition)
             wasserstein_distance = (real_score - fake_score).squeeze()
@@ -349,6 +376,7 @@ class Trainer:
                     self.transition_variable = ((self.global_step-1) % self.transition_iters) / self.transition_iters
                     self.discriminator.update_transition_value(self.transition_variable)
                     self.generator.update_transition_value(self.transition_variable)
+                    self.running_average_generator.update_transition_value(self.transition_variable)
                 
                 real_data = preprocess_images(real_data, self.transition_variable)
                 condition = preprocess_images(condition, self.transition_variable)
@@ -401,6 +429,7 @@ class Trainer:
                 self.log_variable("stats/transition-value", self.transition_variable)
                 self.log_variable("stats/nsec_per_img", nsec_per_img)
                 self.log_variable("stats/training_time_minutes", self.total_time)
+                self.update_running_average_generator()
 
 
                 if (self.global_step) % (self.batch_size*500) == 0:
@@ -438,6 +467,8 @@ class Trainer:
                         current_channels = self.transition_channels[self.transition_step]
                         self.discriminator.extend(int(current_channels*2**0.5))
                         self.generator.extend(current_channels)
+                        self.extend_running_average_generator(current_channels)
+
                         self.current_imsize *= 2
 
                         self.batch_size = self.batch_size_schedule[self.current_imsize]

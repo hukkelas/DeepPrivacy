@@ -4,8 +4,11 @@ generated/
 generated_data/
 checkpoints/
 summaries/
+summaries2/
+lol/
 options/
 logs/
+test_examples/
 .vscode
 __pycache__
 *.zip

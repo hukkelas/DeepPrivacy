@@ -13,6 +13,7 @@ DEFAULT_MAX_IMSIZE = 128
 DEFAULT_START_CHANNEL_SIZE = 256
 DEFALUT_DATASET = "celeba_condition"
 DEFAULT_TRANSITION_ITERS = 12e5
+DEFAULT_GENERATOR_RUNNING_AVERAGE_DECAY = 0.999
 OPTIONS_DIR = "options"
 os.makedirs(OPTIONS_DIR, exist_ok=True)
 # 4 -> 8 // 128 -> 64
@@ -79,6 +80,10 @@ def load_options():
     parser.add_option("--transition-iters", dest="transition_iters",
                       help="Set the number of images to show each transition phase",
                       default=DEFAULT_TRANSITION_ITERS, type=int)
+    parser.add_option("--running-average-generator-decay", dest="running_average_generator_decay",
+                      help="Set the decay rate for the running average of the generator",
+                      default=DEFAULT_GENERATOR_RUNNING_AVERAGE_DECAY,
+                      type=float)
             
     options, _ = parser.parse_args()
 
