@@ -223,6 +223,5 @@ def dataset_to_torch():
     sort_and_save_images(source_dir, target_anonymized_landmark_dir)
 
 if __name__ == "__main__":
-    print("Started")
-    #extract_anonymized()
+    extract_anonymized()
     dataset_to_torch()
