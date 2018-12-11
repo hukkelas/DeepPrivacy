@@ -78,7 +78,7 @@ class Generator(nn.Module):
     
     def extend(self, output_dim):
 
-        print("extending G")
+        print("extending G", output_dim)
         # Downsampling module
         self.current_imsize *= 2
 

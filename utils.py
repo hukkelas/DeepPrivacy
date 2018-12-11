@@ -100,3 +100,18 @@ def _rampdown_linear(epoch, num_epochs, rampdown_length):
 def get_transition_value(x_old, x_new, transition_variable):
     assert x_old.shape == x_new.shape
     return (1-transition_variable) * x_old + transition_variable*x_new
+
+
+def init_model(start_channel_size, num_levels, model):
+    transition_channels = [
+        start_channel_size,
+        start_channel_size,
+        start_channel_size,
+        start_channel_size//2,
+        start_channel_size//4,
+        start_channel_size//8,
+        start_channel_size//16,
+        start_channel_size//32,
+    ]
+    for i in range(num_levels):
+        model.extend(transition_channels[i])

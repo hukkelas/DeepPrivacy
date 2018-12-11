@@ -142,7 +142,7 @@ class ConditionedCelebADataset:
 
     
     def __len__(self):
-        return self.images.shape[0]
+        return self.images.shape[0] // self.batch_size
 
     def __iter__(self):
         self.n = 0
