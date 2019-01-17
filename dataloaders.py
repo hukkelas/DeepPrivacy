@@ -123,22 +123,72 @@ def load_torch_files(dirpath):
 
 def load_celeba_condition(batch_size, imsize=128):
     return ConditionedCelebADataset("data/celeba_torch", imsize, batch_size)
+
+
+
+def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
+    x0_diff = torch.zeros((bounding_boxes.shape[0])).float()
+    x1_diff = torch.zeros_like(x0_diff)
+    y0_diff = torch.zeros_like(x0_diff)
+    y1_diff = torch.zeros_like(x0_diff)
+    width = (bounding_boxes[:, 2] - bounding_boxes[:, 0]).float()
+    height = (bounding_boxes[:, 3] - bounding_boxes[:, 1]).float()
+    # Can change 10% in each direction
+    x0_diff = x0_diff.uniform_(-percentage, percentage) * width
+    x1_diff = x1_diff.uniform_(-percentage, percentage) * width
     
+    y0_diff = y0_diff.uniform_(-percentage, percentage) * height
+    y1_diff = y1_diff.uniform_(-percentage, percentage) * height 
+    bounding_boxes[:, 0] += x0_diff.long()
+    bounding_boxes[:, 1] += y0_diff.long()
+    bounding_boxes[:, 2] += x1_diff.long()
+    bounding_boxes[:, 3] += y1_diff.long()
+    # Ensure that bounding box is within image
+    bounding_boxes[:, 0][bounding_boxes[:, 0] < 0] = 0
+    bounding_boxes[:, 1][bounding_boxes[:, 1] < 0] = 0
+    bounding_boxes[:, 2][bounding_boxes[:, 2] > imsize] = imsize
+    bounding_boxes[:, 3][bounding_boxes[:, 3] > imsize] = imsize
+    return bounding_boxes
+
+def bbox_to_coordinates(bounding_boxes):
+    x0 = bounding_boxes[:, 0]
+    y0 = bounding_boxes[:, 0]
+    x1 = x0 + bounding_boxes[:, 2]
+    y1 = y0 + bounding_boxes[:, 3]
+    bounding_boxes[:, 2] = x1
+    bounding_boxes[:, 3] = y1
+    return bounding_boxes    
+
+
+def cut_bounding_box(condition, bounding_boxes):
+    x0 = bounding_boxes[:, 0]
+    y0 = bounding_boxes[:, 0]
+    x1 = bounding_boxes[:, 2]
+    y1 = bounding_boxes[:, 3]
+    for i in range(condition.shape[0]):
+        condition[i, :, y0[i]:y1[i], x0[i]:x1[i]] = 0
+    return condition
+
+
 class ConditionedCelebADataset:
 
     def __init__(self, dirpath, imsize, batch_size):
         self.images = load_torch_files(os.path.join(dirpath, "original", str(imsize)))
-        self.conditional_images = load_torch_files(os.path.join(dirpath, "anonymized", str(imsize)))
-        assert self.images.shape == self.conditional_images.shape
-        expected_shape = (3, imsize, imsize)
-        assert self.images.shape[1:] == expected_shape, "Shape was: {}. Expected: {}".format(self.images.shape[1:], expected_shape)
+        bounding_box_filepath = os.path.join(dirpath, "bounding_box", "{}.torch".format(imsize))
+        assert os.path.isfile(bounding_box_filepath), "Did not find the bounding box data. Looked in: {}".format(bounding_box_filepath)
+        self.bounding_boxes = torch.load(bounding_box_filepath)
+        self.bounding_boxes = bbox_to_coordinates(self.bounding_boxes)
+        assert self.bounding_boxes.shape[0] == self.images.shape[0], "The number \
+            of samples of images doesn't match number of bounding boxes. Images: {}, bbox: {}".format(self.images.shape[0], self.bounding_boxes.shape[0])
+        expected_imshape = (3, imsize, imsize)
+        assert self.images.shape[1:] == expected_imshape, "Shape was: {}. Expected: {}".format(self.images.shape[1:], expected_imshape)
         print("Dataset loaded. Number of samples:", self.images.shape)
         self.n_samples = self.images.shape[0]
         self.batch_size = batch_size
         self.indices = torch.LongTensor(self.batch_size)
-        self.ones = torch.ones(self.batch_size, dtype=torch.long)
-        self.max = self.n_samples // self.batch_size
+        self.batches_per_epoch = self.n_samples // self.batch_size
         self.validation_size = int(self.n_samples*0.05)
+        self.imsize = imsize
 
     
     def __len__(self):
@@ -149,12 +199,15 @@ class ConditionedCelebADataset:
         return self
     
     def __next__(self):
-        if self.n > self.max:
+        if self.n > self.batches_per_epoch:
             raise StopIteration
         self.n += 1
         indices = self.indices.random_(0, self.n_samples - self.validation_size)
         images = self.images[indices]
-        condition = self.conditional_images[indices]
+        bounding_boxes = self.bounding_boxes[indices]
+        bounding_boxes = bounding_box_data_augmentation(bounding_boxes, self.imsize, 0.1)
+        condition = images.clone()
+        condition = cut_bounding_box(condition, bounding_boxes)
         to_flip = torch.rand(self.batch_size) > 0.5
         try:
             images[to_flip] = utils.flip_horizontal(images[to_flip])
@@ -169,4 +222,9 @@ class ConditionedCelebADataset:
         for i in range(validation_iters):
             start_idx = validation_offset + i*self.batch_size
             end_idx = validation_offset + (i+1)*self.batch_size
-            yield self.images[start_idx:end_idx], self.conditional_images[start_idx:end_idx]
+            images = self.images[start_idx:end_idx]
+            bounding_boxes = self.bounding_boxes[start_idx:end_idx]
+            
+            condition = images.clone()
+            conditions = cut_bounding_box(condition, bounding_boxes)
+            yield images, condition
