@@ -52,7 +52,8 @@ def save_checkpoint(state, save_path, is_best=False, max_keep=None):
         shutil.copyfile(save_path, os.path.join(save_dir, 'best_model.ckpt'))
 
 
-def load_checkpoint(ckpt_dir_or_file, map_location=None, load_best=False):
+def load_checkpoint(ckpt_dir_or_file, load_best=False):
+    map_location = None if torch.cuda.is_available() else "cpu"
     if os.path.isdir(ckpt_dir_or_file):
         if load_best:
             ckpt_path = os.path.join(ckpt_dir_or_file, 'best_model.ckpt')
@@ -78,3 +79,39 @@ def flip_horizontal(images):
     # Flip on -1 dimension
     idx = torch.arange(images.shape[-1] -1, -1, -1 ,dtype=torch.long)
     return images[:, :, :, idx]
+
+
+
+def _rampup(epoch, rampup_length):
+    if epoch < rampup_length:
+        p = max(0.0, float(epoch)) / float(rampup_length)
+        p = 1.0 - p
+        return np.exp(-p*p*5.0)
+    else:
+        return 1.0
+
+def _rampdown_linear(epoch, num_epochs, rampdown_length):
+    if epoch >= num_epochs - rampdown_length:
+        return float(num_epochs - epoch) / rampdown_length
+    else:
+        return 1.0
+
+
+def get_transition_value(x_old, x_new, transition_variable):
+    assert x_old.shape == x_new.shape
+    return (1-transition_variable) * x_old + transition_variable*x_new
+
+
+def init_model(start_channel_size, num_levels, model):
+    transition_channels = [
+        start_channel_size,
+        start_channel_size,
+        start_channel_size,
+        start_channel_size//2,
+        start_channel_size//4,
+        start_channel_size//8,
+        start_channel_size//16,
+        start_channel_size//32,
+    ]
+    for i in range(num_levels):
+        model.extend(transition_channels[i])

@@ -4,17 +4,18 @@ from torch.autograd import Variable
 import torchvision
 import utils
 from utils import init_weights, load_checkpoint, save_checkpoint, to_cuda
-from models import Generator, Discriminator, get_transition_value
+from unet_model import Generator, Discriminator
 import tqdm
 from torchsummary import summary
 import os
-from dataloaders import load_mnist, load_cifar10, load_pokemon, load_celeba
+from dataloaders import load_mnist, load_cifar10, load_pokemon, load_celeba, load_celeba_condition
 from options import load_options, print_options
 import time
+import numpy as np
 torch.backends.cudnn.benchmark=True
 
 
-def gradient_penalty(real_data, fake_data, discriminator):
+def gradient_penalty(real_data, fake_data, discriminator, condition):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() -1)
     epsilon = torch.rand(epsilon_shape)
     epsilon = to_cuda(epsilon)
@@ -22,7 +23,7 @@ def gradient_penalty(real_data, fake_data, discriminator):
     x_hat = epsilon * real_data + (1-epsilon) * fake_data.detach()
     x_hat = to_cuda(Variable(x_hat, requires_grad=True))
 
-    logits, _ = discriminator(x_hat)
+    logits, _ = discriminator(x_hat, condition)
     grad = torch.autograd.grad(
         outputs=logits,
         inputs=x_hat,
@@ -39,8 +40,8 @@ class DataParallellWrapper(torch.nn.Module):
         self.model = model
         self.forward_block = torch.nn.DataParallel(self.model)
 
-    def forward(self, x):
-        return self.forward_block(x)
+    def forward(self, *x):
+        return self.forward_block(*x)
     
     def extend(self, channel_size):
         self.model.extend(channel_size)
@@ -53,16 +54,13 @@ class DataParallellWrapper(torch.nn.Module):
         self.model.transition_value = value
 
 
-def init_model(imsize, noise_dim, start_channel_dim, image_channels, label_size):
-    discriminator = Discriminator(image_channels, imsize, start_channel_dim, label_size)
+def init_model(imsize, noise_dim, start_channel_dim, image_channels):
+    discriminator = Discriminator(image_channels, imsize, int(start_channel_dim*2**0.5))
     discriminator = DataParallellWrapper(discriminator)
     generator = Generator(noise_dim, start_channel_dim, image_channels)
     generator = DataParallellWrapper(generator)
     to_cuda([discriminator, generator])
-    #discriminator.apply(init_weights)
-    #generator.apply(init_weights)
-    #discriminator.summary()
-    #generator.summary()
+
     return discriminator, generator
 
 
@@ -95,19 +93,20 @@ def load_dataset(dataset, batch_size, imsize):
         return load_celeba(batch_size, imsize)
     if dataset == "pokemon":
         return load_pokemon(batch_size, imsize)
+    if dataset == "celeba_condition":
+        return load_celeba_condition(batch_size, imsize)
 
+
+pool = torch.nn.AvgPool2d(2,2)
 def preprocess_images(images, transition_variable):
     images = Variable(images)
     images = to_cuda(images)
     images = adjust_dynamic_range(images)
     # Compute averaged image
-    s = images.shape
-    y = images.view([-1, s[1], s[2]//2, 2, s[3]//2, 2])
-    y = y.mean(dim=3, keepdim=True).mean(dim=5, keepdim=True)
-    y = y.repeat([1, 1, 1, 2, 1, 2])
-    y = y.view(-1, s[1], s[2], s[3])
+    y = pool(images)
+    y = torch.nn.functional.interpolate(y, scale_factor=2)
     
-    images = get_transition_value(y, images, transition_variable)
+    images = utils.get_transition_value(y, images, transition_variable)
 
     return images
 
@@ -123,9 +122,9 @@ class Trainer:
         self.batch_size = options.batch_size[options.imsize]
         self.dataset = options.dataset
         self.num_epochs = options.num_epochs
-        self.label_size = options.label_size
         self.noise_dim = options.noise_dim
         self.learning_rate = options.learning_rate
+        self.running_average_generator_decay = options.running_average_generator_decay
 
         # Image settings
         self.current_imsize = options.imsize
@@ -156,12 +155,13 @@ class Trainer:
             ]
         self.start_time = time.time()
         if not self.load_checkpoint():
-            self.discriminator, self.generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels, options.label_size)
+            self.discriminator, self.generator = init_model(options.imsize, options.noise_dim, options.start_channel_size, options.image_channels)
             self.init_optimizers()
+            self.init_running_average_generator()
         self.data_loader = load_dataset(self.dataset, self.batch_size, self.current_imsize)
 
-                
         self.writer = tensorboardX.SummaryWriter(options.summaries_dir)
+        self.validation_writer = tensorboardX.SummaryWriter(os.path.join(options.summaries_dir, "validation"))
 
         
         print("CUDA AVAILABLE:", torch.cuda.is_available())
@@ -170,7 +170,6 @@ class Trainer:
 
         #self.log_model_graphs()
         
-        self.label_criterion = torch.nn.CrossEntropyLoss(reduction='none')
         self.discriminator.update_transition_value(self.transition_variable)
         self.generator.update_transition_value(self.transition_variable)
 
@@ -186,7 +185,6 @@ class Trainer:
             "batch_size": self.batch_size,
             "dataset": self.dataset,
             "num_epochs": self.num_epochs,
-            "label_size": self.label_size,
             "noise_dim": self.noise_dim,
             "learning_rate": self.learning_rate,
             "current_imsize": self.current_imsize,
@@ -200,7 +198,9 @@ class Trainer:
             "z_sample": self.z_sample.data.cpu().numpy(),
             "total_time": self.total_time,
             "batch_size_schedule": self.batch_size_schedule,
-            "transition_iters":  self.transition_iters
+            "transition_iters":  self.transition_iters,
+            "running_average_generator": self.running_average_generator.state_dict(),
+            "running_average_generator_decay": self.running_average_generator_decay
 
         }
         save_checkpoint(state_dict,
@@ -218,10 +218,10 @@ class Trainer:
             self.batch_size_schedule = ckpt["batch_size_schedule"]
             self.dataset = ckpt["dataset"]
             self.num_epochs = ckpt["num_epochs"]
-            self.label_size = ckpt["label_size"]
             self.noise_dim = ckpt["noise_dim"]
             self.learning_rate = ckpt["learning_rate"]
             self.z_sample = to_cuda(torch.tensor(ckpt["z_sample"]))
+            self.running_average_generator_decay = ckpt["running_average_generator_decay"]
 
             # Image settings
             self.current_imsize = ckpt["current_imsize"]
@@ -250,12 +250,16 @@ class Trainer:
                 current_channels//16,
                 current_channels//32,
                 ]
-            self.discriminator, self.generator = init_model(self.current_imsize //(2**self.transition_step), self.noise_dim, current_channels, self.image_channels, self.label_size)
+            self.discriminator, self.generator = init_model(self.current_imsize //(2**self.transition_step), self.noise_dim, current_channels, self.image_channels)
+            self.init_running_average_generator()
             for i in range(self.transition_step):
-                self.discriminator.extend(self.transition_channels[i])
+                self.discriminator.extend(int(self.transition_channels[i]*2**0.5))
                 self.generator.extend(self.transition_channels[i])
+                
+
             self.discriminator.load_state_dict(ckpt['D'])
             self.generator.load_state_dict(ckpt['G'])
+            self.running_average_generator.load_state_dict(ckpt["running_average_generator"])
             self.init_optimizers()
             self.generator.summary()
             self.discriminator.summary()            
@@ -263,28 +267,49 @@ class Trainer:
             self.g_optimizer.load_state_dict(ckpt['g_optimizer'])
             
             return True
-        except KeyError as e:
+        except Exception as e:
             print(e)
             print(' [*] No checkpoint!')
-            labels = torch.arange(0, options.label_size).repeat(100 // options.label_size)[:100].view(-1, 1) if options.label_size > 0 else None
-            self.z_sample = self.generate_noise(100, labels)
+            self.z_sample = self.generate_noise(100)
             self.start_epoch = 0
             self.global_step = 0
             return False
     
-    def generate_noise(self, batch_size, labels):
+    def generate_noise(self, batch_size):
         z = Variable(torch.randn(batch_size, self.noise_dim))
-        if self.label_size > 0:
-            assert labels.shape[0] == batch_size, "Label size: {}, batch size: {}".format(labels.shape, batch_size)
-            labels_onehot = torch.zeros((batch_size, self.label_size))
-            idx = range(batch_size)
-            labels_onehot[idx, labels.long().squeeze()] = 1
-            assert labels_onehot.sum() == batch_size, "Was : {} expected:{}".format(labels_onehot.sum(), batch_size) 
-            
-            z[:, :self.label_size] = labels_onehot
         z = to_cuda(z)
         return z
     
+    def init_running_average_generator(self):
+        self.running_average_generator = Generator(self.noise_dim, self.start_channel_size, self.image_channels)
+        self.running_average_generator = DataParallellWrapper(self.running_average_generator)
+        self.running_average_generator = to_cuda(self.running_average_generator)
+        for i in range(self.transition_step):
+            self.extend_running_average_generator(self.transition_channels[i])
+    
+
+    def extend_running_average_generator(self, current_channels):
+        g = self.running_average_generator
+        g.extend(current_channels)
+        
+    
+    def update_running_average_generator(self):
+        for avg_parameter, current_parameter in zip(self.running_average_generator.parameters(), self.generator.parameters()):
+            avg_parameter.data = self.running_average_generator_decay*avg_parameter + (1-self.running_average_generator_decay) * current_parameter
+
+    
+
+    def adjust_lr(self):
+        lr_coeff = 1 - min(self.transition_variable*2, 1)
+        lr_coeff = np.exp(-lr_coeff*lr_coeff*5.0)
+        lr = self.learning_rate
+        self.log_variable("stats/learning_rate", lr)
+        if lr != self.learning_rate:
+            for param_group in self.d_optimizer.param_groups:
+                param_group["lr"] = lr
+            for param_group in self.g_optimizer.param_groups:
+                param_group["lr"] = lr
+        
 
 
     def log_model_graphs(self):
@@ -306,44 +331,72 @@ class Trainer:
         self.g_optimizer = torch.optim.Adam(self.generator.parameters(),
                                             lr=self.learning_rate, betas=(0.0, 0.999))
 
-    def log_variable(self, name, value):
-        self.writer.add_scalar(name, value, global_step=self.global_step)
+    def log_variable(self, name, value, log_to_validation=False):
+        if log_to_validation:
+            self.validation_writer.add_scalar(name, value, global_step=self.global_step)
+        else:
+            self.writer.add_scalar(name, value, global_step=self.global_step)
     
+
+    def validate_model(self):
+        real_scores = []
+        fake_scores = []
+        wasserstein_distances = []
+        epsilon_penalties = []
+        self.running_average_generator.eval()
+        for images, condition in self.data_loader.validation_set_generator():
+            real_data = preprocess_images(images, self.transition_variable)
+            condition = preprocess_images(condition, self.transition_variable)
+            fake_data = self.running_average_generator(condition, None)
+            real_score, real_logits = self.discriminator(real_data, condition)
+            fake_score, fake_logits = self.discriminator(fake_data.detach(), condition)
+            wasserstein_distance = (real_score - fake_score).squeeze()
+            epsilon_penalty = (real_score**2).squeeze()
+            real_scores.append(real_score.mean().item())
+            fake_scores.append(fake_score.mean().item())
+            wasserstein_distances.append(wasserstein_distance.mean().item())
+            epsilon_penalties.append(epsilon_penalty.mean().item())
+        self.log_variable('discriminator/wasserstein-distance',np.mean(wasserstein_distances), True )
+        self.log_variable("discriminator/real-score", np.mean(real_scores), True)
+        self.log_variable("discriminator/fake-score", np.mean(fake_scores), True)
+        self.log_variable("discriminator/epsilon-penalty", np.mean(epsilon_penalties), True)
+        directory = os.path.join(self.generated_data_dir, "validation")
+        os.makedirs(directory, exist_ok=True)
+        save_images(self.validation_writer, normalize_img(fake_data), self.global_step, directory)
+
+
     def train(self):
         for epoch in range(self.start_epoch, self.num_epochs):
-            for i, (real_data, labels) in enumerate(self.data_loader):
+            for i, (real_data, condition) in enumerate(self.data_loader):
                 batch_start_time = time.time()
                 self.generator.train()
-                labels = to_cuda(Variable(labels))
+                self.adjust_lr()
                 self.global_step += 1 * self.batch_size
                 if self.is_transitioning:
                     self.transition_variable = ((self.global_step-1) % self.transition_iters) / self.transition_iters
                     self.discriminator.update_transition_value(self.transition_variable)
                     self.generator.update_transition_value(self.transition_variable)
-                    
+                    self.running_average_generator.update_transition_value(self.transition_variable)
+                
                 real_data = preprocess_images(real_data, self.transition_variable)
-                z = self.generate_noise(real_data.shape[0], labels)
+                condition = preprocess_images(condition, self.transition_variable)
+                z = self.generate_noise(real_data.shape[0])
 
                 # Forward G
-                fake_data = self.generator(z)
+                fake_data = self.generator(condition, z)
                 # Train Discriminator
-                real_scores, real_logits = self.discriminator(real_data)
-                fake_scores, fake_logits = self.discriminator(fake_data.detach())
+                real_scores, real_logits = self.discriminator(real_data, condition)
+                fake_scores, fake_logits = self.discriminator(fake_data.detach(), condition)
 
                 wasserstein_distance = (real_scores - fake_scores).squeeze()  # Wasserstein-1 Distance
-                gradient_pen = gradient_penalty(real_data.data, fake_data.data, self.discriminator)
+                gradient_pen = gradient_penalty(real_data.data, fake_data.detach(), self.discriminator, condition)
                 # Epsilon penalty
                 epsilon_penalty = (real_scores ** 2).squeeze()
 
-                # Label loss penalty
-                label_penalty_discriminator = to_cuda(torch.Tensor([0]))
-                if self.label_size > 0:
-                    label_penalty_reals = self.label_criterion(real_logits, labels)
-                    label_penalty_fakes = self.label_criterion(fake_logits, labels)
-                    label_penalty_discriminator = (label_penalty_reals + label_penalty_fakes).squeeze()
-                assert wasserstein_distance.shape == gradient_pen.shape
+
+                #assert wasserstein_distance.shape == gradient_pen.shape
                 assert wasserstein_distance.shape == epsilon_penalty.shape
-                D_loss = -wasserstein_distance + gradient_pen * 10 + epsilon_penalty * 0.001 + label_penalty_discriminator
+                D_loss = -wasserstein_distance + gradient_pen * 10 + epsilon_penalty * 0.001
 
 
                 D_loss = D_loss.mean()
@@ -353,14 +406,12 @@ class Trainer:
 
 
                 # Forward G
-                fake_scores, fake_logits = self.discriminator(fake_data)
-                
-                # Label loss penalty
-                label_penalty_generator = self.label_criterion(fake_logits, labels).squeeze() if self.label_size > 0 else to_cuda(torch.Tensor([0]))
+                fake_scores, fake_logits = self.discriminator(fake_data, condition)
+
         
                 
-                G_loss = (-fake_scores + label_penalty_generator).mean()
-                #G_loss = (-fake_scores).mean()
+                G_loss = (-fake_scores ).mean()
+
                 self.d_optimizer.zero_grad()
                 self.g_optimizer.zero_grad()
                 G_loss.backward()
@@ -378,22 +429,29 @@ class Trainer:
                 self.log_variable("stats/transition-value", self.transition_variable)
                 self.log_variable("stats/nsec_per_img", nsec_per_img)
                 self.log_variable("stats/training_time_minutes", self.total_time)
-                self.log_variable("discriminator/label-penalty", label_penalty_discriminator.mean())
-                self.log_variable("generator/label-penalty", label_penalty_generator.mean())
+                self.update_running_average_generator()
 
 
                 if (self.global_step) % (self.batch_size*500) == 0:
                     self.generator.eval()
                     print(os.system("nvidia-smi"))
-                    fake_data_sample = normalize_img(self.generator(self.z_sample).data)
+                    fake_data_sample = normalize_img(self.generator(condition, z).detach().data)
                     save_images(self.writer, fake_data_sample, self.global_step, self.generated_data_dir)
 
                     # Save input images
                     imsize = real_data.shape[2]
                     filename = "reals{0}_{1}x{1}.jpg".format(self.global_step, imsize)
                     filepath = os.path.join(self.generated_data_dir, filename)
-                    to_save = normalize_img(real_data[:100])
+                    to_save = normalize_img(real_data)
                     torchvision.utils.save_image(to_save, filepath, nrow=10)
+
+                    filename = "condition{0}_{1}x{1}.jpg".format(self.global_step, imsize)
+                    filepath = os.path.join(self.generated_data_dir, filename)
+                    to_save = normalize_img(condition)
+                    torchvision.utils.save_image(to_save, filepath, nrow=10)
+                if self.global_step % (self.batch_size*3000) == 0:
+                    self.validate_model()
+
                 if self.global_step % (self.batch_size * 1000) == 0:
                     self.save_checkpoint(epoch)
                 if self.global_step % self.transition_iters == 0:
@@ -407,14 +465,17 @@ class Trainer:
                         self.save_checkpoint(epoch)
                     elif self.current_imsize < self.max_imsize:
                         current_channels = self.transition_channels[self.transition_step]
-                        self.discriminator.extend(current_channels)
+                        self.discriminator.extend(int(current_channels*2**0.5))
                         self.generator.extend(current_channels)
+                        self.extend_running_average_generator(current_channels)
+
                         self.current_imsize *= 2
 
                         self.batch_size = self.batch_size_schedule[self.current_imsize]
 
                         
                         self.discriminator.summary(), self.generator.summary()
+                        del self.data_loader
                         self.data_loader = load_dataset(self.dataset, self.batch_size, self.current_imsize)
                         self.is_transitioning = True
 
@@ -422,8 +483,10 @@ class Trainer:
                         self.transition_variable = 0
                         self.discriminator.update_transition_value(self.transition_variable)
                         self.generator.update_transition_value(self.transition_variable)
-
-                        fake_data_sample = normalize_img(self.generator(self.z_sample).data)
+                        z_sample = next(iter(self.data_loader))[1]
+                        z_sample = preprocess_images(z_sample, self.transition_variable)
+                        z = self.generate_noise(z_sample.shape[0])
+                        fake_data_sample = normalize_img(self.generator(z_sample, z).data)
                         os.makedirs("lol", exist_ok=True)
                         filepath = os.path.join("lol", "test.jpg")
                         torchvision.utils.save_image(fake_data_sample[:100], filepath, nrow=10)

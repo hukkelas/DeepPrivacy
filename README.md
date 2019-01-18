@@ -1,45 +1,56 @@
 # DeepPrivacy
 
-
-## Implemented from paper
-
-1. Progressive growing (4x4 -> 1024 possible)
-2. Identical network architecture 
-3. Equalized learning rate
-4. Pixelwise Feature Normalization
-5. Mini-batch Standard Deviation (not properly tested)
-6. Auxillary information about labels (MNIST/CIFAR10)
-7. WGAN-GP with epsilon penalty (From Appendix A.1)
-
-## Differences from paper
-1. Learning rate. We use 0.0002 instead of 0.001 (seems to work better with our implementation)
-
-
-## TODO: 
-1. Generate and train on CelebaHQ 
-2. Track Inception Score and Sliced Wasserstein Distance
-3. Train network on 128x128, 256x256 ++
-
-
-## Current result (64x64) on original aligned CelebA
-![alt text](examples/64x64.jpg)
-
 ## Requirements
-Pytorch >= 0.4
-Python >= 3.6
+- Pytorch  0.4.1
+- Python >= 3.6
 
-## Get started (Local machine)
+Install dependencies 
 
-1. Install dependencies: 
+```pip install -r requirements.txt``` 
 
-```python
-pip install -r requirements.txt
-```
-2. Train network
+## Download dataset and pre-process it
+1. Download the celebA dataset from [http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html](http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html)
+2. Place img_celeba in `data/celeba/img_celeba`  and the `list_bbox_celeba.txt` in the folder `data/celeba`
+3. Run `python dataset_tool.py` (PS: This can take several hours on a low-end computer.)
+4. The dataset should be saved to  `data/celeba_torch` in .torch files
 
-```python
+
+
+## Get started 
+
+To start training a model:
+
+```bash
 python train.py
 ```
+
+Hyperparameters etc can be set with arguments. For a full list of arguments run:
+
+```python
+python train.py -h 
+```
+
+
+
+To continue training on a previous model
+
+```bash
+python train.py --model model_name
+```
+
+Launch tensorboard
+
+```bash
+tensorboard --logdir summaries/
+```
+
+Run scripts to perform experiments on a trained model from the scripts/ folder. E.g: 
+
+```bash
+python -m scripts.automatic_metric_test
+```
+
+
 
 ## Get started (Docker)
 
