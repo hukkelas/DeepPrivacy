@@ -13,8 +13,9 @@ import numpy as np
 import cv2
 from torchvision.transforms.functional import to_tensor
 import os
-from test import expand_bounding_box
+from dataset_tool_new import expand_bounding_box
 from scripts.utils import init_generator, get_model_name
+
 if __name__ == "__main__":
     model_name = get_model_name()
     ckpt_path = os.path.join("checkpoints", model_name)
