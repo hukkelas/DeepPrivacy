@@ -327,9 +327,9 @@ class Trainer:
 
     def init_optimizers(self):
         self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(), 
-                                            lr=self.learning_rate, betas=(0.0, 0.999))
+                                            lr=self.learning_rate, betas=(0.0, 0.99))
         self.g_optimizer = torch.optim.Adam(self.generator.parameters(),
-                                            lr=self.learning_rate, betas=(0.0, 0.999))
+                                            lr=self.learning_rate, betas=(0.0, 0.99))
 
     def log_variable(self, name, value, log_to_validation=False):
         if log_to_validation:
