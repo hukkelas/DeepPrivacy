@@ -127,22 +127,22 @@ def load_celeba_condition(batch_size, imsize=128):
 
 
 def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
-    x0_diff = torch.zeros((bounding_boxes.shape[0])).float()
-    x1_diff = torch.zeros_like(x0_diff)
-    y0_diff = torch.zeros_like(x0_diff)
-    y1_diff = torch.zeros_like(x0_diff)
+    # Data augment width and height by percentage of width.
+    # Bounding box will preserve its center.
+    
+    width_diff = torch.zeros((bounding_boxes.shape[0])).float()
+    height_diff = torch.zeros_like(width_diff)
     width = (bounding_boxes[:, 2] - bounding_boxes[:, 0]).float()
     height = (bounding_boxes[:, 3] - bounding_boxes[:, 1]).float()
+
     # Can change 10% in each direction
-    x0_diff = x0_diff.uniform_(-percentage, percentage) * width
-    x1_diff = x1_diff.uniform_(-percentage, percentage) * width
-    
-    y0_diff = y0_diff.uniform_(-percentage, percentage) * height
-    y1_diff = y1_diff.uniform_(-percentage, percentage) * height 
-    bounding_boxes[:, 0] += x0_diff.long()
-    bounding_boxes[:, 1] += y0_diff.long()
-    bounding_boxes[:, 2] += x1_diff.long()
-    bounding_boxes[:, 3] += y1_diff.long()
+    width_diff = width_diff.uniform_(-percentage, percentage) * width
+
+    height_diff = height_diff.uniform_(-percentage, percentage) * height
+    bounding_boxes[:, 0] -= width_diff.long()
+    bounding_boxes[:, 1] -= height_diff.long()
+    bounding_boxes[:, 2] += width_diff.long()
+    bounding_boxes[:, 3] += height_diff.long()
     # Ensure that bounding box is within image
     bounding_boxes[:, 0][bounding_boxes[:, 0] < 0] = 0
     bounding_boxes[:, 1][bounding_boxes[:, 1] < 0] = 0
