@@ -68,6 +68,11 @@ def quadratic_bounding_box(x0, y0, width, height, imshape):
         if imshape[0] < y1:
             diff = y1 - imshape[0]
             y0 -= diff
+    assert x0 >= 0, "Bounding box outside image."
+    assert y0 >= 0, "Bounding box outside image."
+    assert x0+width <= imshape[1], "Bounding box outside image."
+    assert y0+height <= imshape[0], "Bounding box outside image."
+
     return x0, y0, width, height
 
 
@@ -214,4 +219,4 @@ def dataset_to_torch(bounding_box_dict):
 
 if __name__ == "__main__":
     new_bounding_box_coords = extract_anonymized()
-    dataset_to_torch(new_bounding_box_coords)
+    #dataset_to_torch(new_bounding_box_coords)

@@ -226,5 +226,5 @@ class ConditionedCelebADataset:
             bounding_boxes = self.bounding_boxes[start_idx:end_idx]
             
             condition = images.clone()
-            conditions = cut_bounding_box(condition, bounding_boxes)
+            condition = cut_bounding_box(condition, bounding_boxes)
             yield images, condition
