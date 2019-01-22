@@ -178,7 +178,7 @@ class ConditionedCelebADataset:
         bounding_box_filepath = os.path.join(dirpath, "bounding_box", "{}.torch".format(imsize))
         assert os.path.isfile(bounding_box_filepath), "Did not find the bounding box data. Looked in: {}".format(bounding_box_filepath)
         self.bounding_boxes = torch.load(bounding_box_filepath)
-        self.bounding_boxes = bbox_to_coordinates(self.bounding_boxes)
+        #self.bounding_boxes = bbox_to_coordinates(self.bounding_boxes)
         assert self.bounding_boxes.shape[0] == self.images.shape[0], "The number \
             of samples of images doesn't match number of bounding boxes. Images: {}, bbox: {}".format(self.images.shape[0], self.bounding_boxes.shape[0])
         expected_imshape = (3, imsize, imsize)
