@@ -187,8 +187,7 @@ class Discriminator(nn.Module):
         self.from_rgb_old = conv_module_bn(in_channels*2, start_channel_dim, 1, 0)
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
-            MinibatchStdLayer(),
-            conv_module_bn(start_channel_dim+1, start_channel_dim, 3, 1),
+            conv_module_bn(start_channel_dim, start_channel_dim, 3, 1),
             conv_module_bn(start_channel_dim, start_channel_dim, 4, 0),            
         )
         self.output_layer = WSLinear(start_channel_dim, 1)
