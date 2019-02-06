@@ -12,6 +12,7 @@ from dataloaders import load_mnist, load_cifar10, load_pokemon, load_celeba, loa
 from options import load_options, print_options
 import time
 import numpy as np
+from metrics import fid
 torch.backends.cudnn.benchmark=True
 
 
@@ -138,10 +139,11 @@ class Trainer:
         
         # Transition settings
         self.transition_variable = 1.
-        self.transition_iters = options.transition_iters // self.batch_size * self.batch_size
+        self.transition_iters = options.transition_iters
         self.is_transitioning = False
         self.transition_step = 0
         self.start_channel_size = options.start_channel_size
+        self.latest_switch = 0
         current_channels = options.start_channel_size
         self.transition_channels = [
             current_channels,
@@ -169,7 +171,7 @@ class Trainer:
 
 
         #self.log_model_graphs()
-        
+        self.log_variable("stats/batch_size", self.batch_size)
         self.discriminator.update_transition_value(self.transition_variable)
         self.generator.update_transition_value(self.transition_variable)
 
@@ -200,7 +202,8 @@ class Trainer:
             "batch_size_schedule": self.batch_size_schedule,
             "transition_iters":  self.transition_iters,
             "running_average_generator": self.running_average_generator.state_dict(),
-            "running_average_generator_decay": self.running_average_generator_decay
+            "running_average_generator_decay": self.running_average_generator_decay,
+            "latest_switch": self.latest_switch
 
         }
         save_checkpoint(state_dict,
@@ -231,10 +234,11 @@ class Trainer:
             # Logging variables
             # Transition settings
             self.transition_variable = ckpt["transition_variable"]
-            #self.transition_iters = ckpt["transition_iters"]
-            self.transition_iters = 12e5 // ckpt["batch_size"] * ckpt["batch_size"]
+            self.transition_iters = ckpt["transition_iters"]
+            #self.transition_iters = 12e5 // ckpt["batch_size"] * ckpt["batch_size"]
             self.is_transitioning = ckpt["is_transitioning"]
             self.transition_step = ckpt["transition_step"]
+            self.latest_switch = ckpt["latest_switch"]
             self.global_step = ckpt["global_step"]
             #self.total_time = ckpt["total_time"]
             self.start_time = time.time() - ckpt["total_time"] * 60
@@ -344,25 +348,41 @@ class Trainer:
         wasserstein_distances = []
         epsilon_penalties = []
         self.running_average_generator.eval()
-        for images, condition in self.data_loader.validation_set_generator():
+
+        real_images = torch.zeros((self.data_loader.validation_size, 3, self.current_imsize, self.current_imsize))
+        fake_images = torch.zeros((self.data_loader.validation_size, 3, self.current_imsize, self.current_imsize))
+        for idx, (images, condition) in tqdm.tqdm(enumerate(self.data_loader.validation_set_generator())):
             real_data = preprocess_images(images, self.transition_variable)
             condition = preprocess_images(condition, self.transition_variable)
             fake_data = self.running_average_generator(condition, None)
-            real_score, real_logits = self.discriminator(real_data, condition)
-            fake_score, fake_logits = self.discriminator(fake_data.detach(), condition)
+            real_score, _ = self.discriminator(real_data, condition)
+            fake_score, _ = self.discriminator(fake_data.detach(), condition)
             wasserstein_distance = (real_score - fake_score).squeeze()
             epsilon_penalty = (real_score**2).squeeze()
             real_scores.append(real_score.mean().item())
             fake_scores.append(fake_score.mean().item())
             wasserstein_distances.append(wasserstein_distance.mean().item())
             epsilon_penalties.append(epsilon_penalty.mean().item())
+
+            fake_data, real_data = normalize_img(fake_data), normalize_img(real_data)
+            
+            start_idx = idx*self.batch_size
+            end_idx = (idx+1)*self.batch_size
+            real_images[start_idx:end_idx] = real_data.cpu().data
+            fake_images[start_idx:end_idx] = fake_data.cpu().data
+            del real_data, fake_data, real_score, fake_score
+        if self.current_imsize >= 4:
+            fid_val = fid.calculate_fid(real_images, fake_images, 8)
+        
+            print("FID:", fid_val)
+            self.log_variable("stats/fid", np.mean(fid_val), True)
         self.log_variable('discriminator/wasserstein-distance',np.mean(wasserstein_distances), True )
         self.log_variable("discriminator/real-score", np.mean(real_scores), True)
         self.log_variable("discriminator/fake-score", np.mean(fake_scores), True)
         self.log_variable("discriminator/epsilon-penalty", np.mean(epsilon_penalties), True)
         directory = os.path.join(self.generated_data_dir, "validation")
         os.makedirs(directory, exist_ok=True)
-        save_images(self.validation_writer, normalize_img(fake_data), self.global_step, directory)
+        save_images(self.validation_writer, fake_images[:50], self.global_step, directory)
 
 
     def train(self):
@@ -371,7 +391,6 @@ class Trainer:
                 batch_start_time = time.time()
                 self.generator.train()
                 self.adjust_lr()
-                self.global_step += 1 * self.batch_size
                 if self.is_transitioning:
                     self.transition_variable = ((self.global_step-1) % self.transition_iters) / self.transition_iters
                     self.discriminator.update_transition_value(self.transition_variable)
@@ -430,11 +449,10 @@ class Trainer:
                 self.log_variable("stats/nsec_per_img", nsec_per_img)
                 self.log_variable("stats/training_time_minutes", self.total_time)
                 self.update_running_average_generator()
-
+                self.global_step += self.batch_size
 
                 if (self.global_step) % (self.batch_size*500) == 0:
                     self.generator.eval()
-                    print(os.system("nvidia-smi"))
                     fake_data_sample = normalize_img(self.generator(condition, z).detach().data)
                     save_images(self.writer, fake_data_sample, self.global_step, self.generated_data_dir)
 
@@ -448,15 +466,14 @@ class Trainer:
                     filename = "condition{0}_{1}x{1}.jpg".format(self.global_step, imsize)
                     filepath = os.path.join(self.generated_data_dir, filename)
                     to_save = normalize_img(condition)
-                    torchvision.utils.save_image(to_save, filepath, nrow=10)
-                if self.global_step % (self.batch_size*3000) == 0:
-                    self.validate_model()
+                    torchvision.utils.save_image(to_save, filepath, nrow=10)                    
 
-                if self.global_step % (self.batch_size * 1000) == 0:
+                if self.global_step//self.batch_size*self.batch_size % (2e5//self.batch_size * self.batch_size) == 0:
                     self.save_checkpoint(epoch)
-                if self.global_step % self.transition_iters == 0:
-
-                    if self.global_step % (self.transition_iters*2) == 0:
+                    self.validate_model()
+                if self.global_step >= (self.latest_switch + self.transition_iters):
+                    self.latest_switch += self.transition_iters
+                    if self.is_transitioning:
                         # Stop transitioning
                         self.is_transitioning = False
                         self.transition_variable = 1.0
@@ -472,7 +489,7 @@ class Trainer:
                         self.current_imsize *= 2
 
                         self.batch_size = self.batch_size_schedule[self.current_imsize]
-
+                        self.log_variable("stats/batch_size", self.batch_size)
                         
                         self.discriminator.summary(), self.generator.summary()
                         del self.data_loader

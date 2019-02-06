@@ -4,7 +4,7 @@ import os
 import math
 import json
 DEFAULT_NUM_EPOCHS = 500
-DEFAULT_BATCH_SIZE = "256,256,256,128,46,28,8,7,7" # V100-32GB settings
+DEFAULT_BATCH_SIZE = "256,256,256,128,46,24,8,7,7" # V100-32GB settings
 DEFAULT_N_CRITIC = 1
 DEFAULT_LEARNING_RATE = 0.00125
 DEFAULT_NOISE_DIM = 256
@@ -32,7 +32,7 @@ def print_options(dic):
     #dic = vars(options)
     print("="*80)
     print("OPTIONS USED:")
-    banned_keys = ["G", "D", "g_optimizer", "d_optimizer", "z_sample"]
+    banned_keys = ["G", "D", "g_optimizer", "d_optimizer", "z_sample", "running_average_generator"]
     for (key, item) in dic.items():
         if key in banned_keys:
             continue
