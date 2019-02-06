@@ -111,6 +111,7 @@ class CelebAGenerator:
 def load_torch_files(dirpath):
     images = []
     files = glob.glob(os.path.join(dirpath, "*.torch"))
+    files.sort(key=lambda x: int(os.path.basename(x).split(".")[0]))
     assert len(files) > 0, "Empty directory: " + dirpath
     for fpath in files:
         assert os.path.isfile(fpath), "Is not file: " + fpath
