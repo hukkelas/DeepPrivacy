@@ -370,7 +370,7 @@ class Trainer:
             real_images[start_idx:end_idx] = real_data.cpu().data
             fake_images[start_idx:end_idx] = fake_data.cpu().data
             del real_data, fake_data, real_score, fake_score
-        if self.current_imsize >= 4:
+        if self.current_imsize >= 64:
             fid_val = fid.calculate_fid(real_images, fake_images, 8)
         
             print("FID:", fid_val)
