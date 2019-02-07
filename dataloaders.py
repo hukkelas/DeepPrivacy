@@ -130,16 +130,13 @@ def load_celeba_condition(batch_size, imsize=128):
 def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
     # Data augment width and height by percentage of width.
     # Bounding box will preserve its center.
-    
-    width_diff = torch.zeros((bounding_boxes.shape[0])).float()
-    height_diff = torch.zeros_like(width_diff)
+    shrink_percentage = torch.zeros((bounding_boxes.shape[0])).float().uniform_(-percentage, percentage)
     width = (bounding_boxes[:, 2] - bounding_boxes[:, 0]).float()
     height = (bounding_boxes[:, 3] - bounding_boxes[:, 1]).float()
 
     # Can change 10% in each direction
-    width_diff = width_diff.uniform_(-percentage, percentage) * width
-
-    height_diff = height_diff.uniform_(-percentage, percentage) * height
+    width_diff = shrink_percentage * width
+    height_diff = shrink_percentage * height
     bounding_boxes[:, 0] -= width_diff.long()
     bounding_boxes[:, 1] -= height_diff.long()
     bounding_boxes[:, 2] += width_diff.long()
@@ -163,7 +160,7 @@ def bbox_to_coordinates(bounding_boxes):
 
 def cut_bounding_box(condition, bounding_boxes):
     x0 = bounding_boxes[:, 0]
-    y0 = bounding_boxes[:, 0]
+    y0 = bounding_boxes[:, 1]
     x1 = bounding_boxes[:, 2]
     y1 = bounding_boxes[:, 3]
     for i in range(condition.shape[0]):
@@ -178,7 +175,13 @@ class ConditionedCelebADataset:
         bounding_box_filepath = os.path.join(dirpath, "bounding_box", "{}.torch".format(imsize))
         assert os.path.isfile(bounding_box_filepath), "Did not find the bounding box data. Looked in: {}".format(bounding_box_filepath)
         self.bounding_boxes = torch.load(bounding_box_filepath)
-        self.bounding_boxes = bbox_to_coordinates(self.bounding_boxes)
+        
+        landmark_filepath = os.path.join(dirpath, "landmarks", "{}.torch".format(imsize))
+        assert os.path.isfile(landmark_filepath), "Did not find the landmark data. Looked in: {}".format(landmark_filepath)
+        self.landmarks = torch.load(landmark_filepath).float() / imsize
+
+        #self.bounding_boxes = bbox_to_coordinates(self.bounding_boxes)
+        assert self.landmarks.shape[0] == self.bounding_boxes.shape[0]
         assert self.bounding_boxes.shape[0] == self.images.shape[0], "The number \
             of samples of images doesn't match number of bounding boxes. Images: {}, bbox: {}".format(self.images.shape[0], self.bounding_boxes.shape[0])
         expected_imshape = (3, imsize, imsize)
@@ -206,16 +209,18 @@ class ConditionedCelebADataset:
         indices = self.indices.random_(0, self.n_samples - self.validation_size)
         images = self.images[indices]
         bounding_boxes = self.bounding_boxes[indices]
-        bounding_boxes = bounding_box_data_augmentation(bounding_boxes, self.imsize, 0.1)
+        landmarks = self.landmarks[indices] # only left eye, right eye, nose
+        bounding_boxes = bounding_box_data_augmentation(bounding_boxes, self.imsize, 0.2)
         condition = images.clone()
         condition = cut_bounding_box(condition, bounding_boxes)
-        to_flip = torch.rand(self.batch_size) > 0.5
+        to_flip = torch.rand(self.batch_size) > .5
         try:
             images[to_flip] = utils.flip_horizontal(images[to_flip])
             condition[to_flip] = utils.flip_horizontal(condition[to_flip])
-        except:
-            print("failed")
-        return images, condition
+            landmarks[to_flip][:, range(0, landmarks.shape[1], 2)] = 1 - landmarks[to_flip][:, range(0, landmarks.shape[1], 2)] # Flip the x-values
+        except Exception as e:
+            print("Could not flip images.", e)
+        return images, condition, landmarks
     
     def validation_set_generator(self):
         validation_iters = self.validation_size // self.batch_size
@@ -225,7 +230,7 @@ class ConditionedCelebADataset:
             end_idx = validation_offset + (i+1)*self.batch_size
             images = self.images[start_idx:end_idx]
             bounding_boxes = self.bounding_boxes[start_idx:end_idx]
-            
+            landmarks = self.landmarks[start_idx:end_idx]
             condition = images.clone()
             condition = cut_bounding_box(condition, bounding_boxes)
-            yield images, condition
+            yield images, condition, landmarks

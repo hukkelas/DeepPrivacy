@@ -63,10 +63,7 @@ def init_model(imsize, noise_dim, start_channel_dim, image_channels):
     to_cuda([discriminator, generator])
 
     return discriminator, generator
-
-
-
-
+    
 
 def adjust_dynamic_range(data):
     return data*2-1
@@ -271,7 +268,7 @@ class Trainer:
             self.g_optimizer.load_state_dict(ckpt['g_optimizer'])
             
             return True
-        except Exception as e:
+        except FileNotFoundError as e:
             print(e)
             print(' [*] No checkpoint!')
             self.z_sample = self.generate_noise(100)
@@ -351,12 +348,14 @@ class Trainer:
 
         real_images = torch.zeros((self.data_loader.validation_size, 3, self.current_imsize, self.current_imsize))
         fake_images = torch.zeros((self.data_loader.validation_size, 3, self.current_imsize, self.current_imsize))
-        for idx, (images, condition) in tqdm.tqdm(enumerate(self.data_loader.validation_set_generator())):
+
+        for images, condition, landmarks in self.data_loader.validation_set_generator():
             real_data = preprocess_images(images, self.transition_variable)
             condition = preprocess_images(condition, self.transition_variable)
-            fake_data = self.running_average_generator(condition, None)
-            real_score, _ = self.discriminator(real_data, condition)
-            fake_score, _ = self.discriminator(fake_data.detach(), condition)
+            landmarks = to_cuda(landmarks)
+            fake_data = self.running_average_generator(condition, None, landmarks)
+            real_score, real_logits = self.discriminator(real_data, condition)
+            fake_score, fake_logits = self.discriminator(fake_data.detach(), condition)
             wasserstein_distance = (real_score - fake_score).squeeze()
             epsilon_penalty = (real_score**2).squeeze()
             real_scores.append(real_score.mean().item())
@@ -371,7 +370,7 @@ class Trainer:
             real_images[start_idx:end_idx] = real_data.cpu().data
             fake_images[start_idx:end_idx] = fake_data.cpu().data
             del real_data, fake_data, real_score, fake_score
-        if self.current_imsize >= 4:
+        if self.current_imsize >= 64:
             fid_val = fid.calculate_fid(real_images, fake_images, 8)
         
             print("FID:", fid_val)
@@ -387,7 +386,7 @@ class Trainer:
 
     def train(self):
         for epoch in range(self.start_epoch, self.num_epochs):
-            for i, (real_data, condition) in enumerate(self.data_loader):
+            for i, (real_data, condition, landmarks) in enumerate(self.data_loader):
                 batch_start_time = time.time()
                 self.generator.train()
                 self.adjust_lr()
@@ -399,10 +398,11 @@ class Trainer:
                 
                 real_data = preprocess_images(real_data, self.transition_variable)
                 condition = preprocess_images(condition, self.transition_variable)
+                landmarks = to_cuda(landmarks)
                 z = self.generate_noise(real_data.shape[0])
 
                 # Forward G
-                fake_data = self.generator(condition, z)
+                fake_data = self.generator(condition, z, landmarks)
                 # Train Discriminator
                 real_scores, real_logits = self.discriminator(real_data, condition)
                 fake_scores, fake_logits = self.discriminator(fake_data.detach(), condition)
@@ -453,7 +453,7 @@ class Trainer:
 
                 if (self.global_step) % (self.batch_size*500) == 0:
                     self.generator.eval()
-                    fake_data_sample = normalize_img(self.generator(condition, z).detach().data)
+                    fake_data_sample = normalize_img(self.generator(condition, z, landmarks).detach().data)
                     save_images(self.writer, fake_data_sample, self.global_step, self.generated_data_dir)
 
                     # Save input images
@@ -500,10 +500,11 @@ class Trainer:
                         self.transition_variable = 0
                         self.discriminator.update_transition_value(self.transition_variable)
                         self.generator.update_transition_value(self.transition_variable)
-                        z_sample = next(iter(self.data_loader))[1]
+                        _, z_sample, landmark = next(iter(self.data_loader))
+                        landmark = to_cuda(landmark)
                         z_sample = preprocess_images(z_sample, self.transition_variable)
                         z = self.generate_noise(z_sample.shape[0])
-                        fake_data_sample = normalize_img(self.generator(z_sample, z).data)
+                        fake_data_sample = normalize_img(self.generator(z_sample, z, landmark).data)
                         os.makedirs("lol", exist_ok=True)
                         filepath = os.path.join("lol", "test.jpg")
                         torchvision.utils.save_image(fake_data_sample[:100], filepath, nrow=10)
