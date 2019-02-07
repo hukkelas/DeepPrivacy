@@ -349,7 +349,7 @@ class Trainer:
         real_images = torch.zeros((self.data_loader.validation_size, 3, self.current_imsize, self.current_imsize))
         fake_images = torch.zeros((self.data_loader.validation_size, 3, self.current_imsize, self.current_imsize))
 
-        for images, condition, landmarks in self.data_loader.validation_set_generator():
+        for idx, (images, condition, landmarks) in enumerate(self.data_loader.validation_set_generator()):
             real_data = preprocess_images(images, self.transition_variable)
             condition = preprocess_images(condition, self.transition_variable)
             landmarks = to_cuda(landmarks)
