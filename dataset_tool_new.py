@@ -112,8 +112,8 @@ def anonymize_image_and_save(imname, x0, y0, width, height):
         target_path = os.path.join(TARGET_DIR, imname)
         plt.imsave(target_path, im)
 
-        assert x0 >= 0
-        assert y0 >= 0
+        assert x0 >= 0, "X0 is negative"
+        assert y0 >= 0, "Y0 is negative"
         assert x0 + width <= im.shape[1], "Bounding box max coord: {}, imshape: {}".format(x0+width, im.shape)
         assert y0 + height <= im.shape[0], "Bounding box max coord: {}, imshape: {}".format(y0+height, im.shape)
         return target_path, (int(x0_exp), int(y0_exp))
@@ -127,7 +127,7 @@ def extract_anonymized():
     bbox_df = pd.read_csv(bbox_file_path, skiprows=[0], delim_whitespace=True)
     image_start_indices = {}
 
-    with multiprocessing.Pool(multiprocessing.cpu_count()-2) as p:
+    with multiprocessing.Pool(multiprocessing.cpu_count() - 2) as p:
         jobs = []
         for idx in range(len(bbox_df)):
             d = bbox_df.iloc[idx]
@@ -170,10 +170,9 @@ def save_bounding_boxes(bounding_boxes, target_dir, image_height, image_width):
   os.makedirs(target_dir, exist_ok=True)
 
   imsizes = [4, 8, 16, 32, 64, 128]
-  for imsize in imsizes:
+  for imsize in tqdm(imsizes, desc="Saving bounding boxes"):
     shrink_factor_width = (image_width.float() / imsize).view(-1, 1)
     shrink_factor_height = (image_height.float() / imsize).view(-1, 1)
-
     bounding_boxes_resized = bounding_boxes.float()
     bounding_boxes_resized[:, [0, 2]] /= shrink_factor_width
     bounding_boxes_resized[:, [1, 3]] /= shrink_factor_height
@@ -186,21 +185,21 @@ def save_bounding_boxes(bounding_boxes, target_dir, image_height, image_width):
     torch.save(bounding_boxes_resized, target_path)
     del bounding_boxes_resized
 
-def save_landmarks(landmarks, target_dir, image_height, image_width):
+def save_landmarks(landmarks, target_dir, original_image_size):
   target_dir = os.path.join(target_dir, "landmarks")
   os.makedirs(target_dir, exist_ok=True)
+  #print(image_height, image_width)
+  #print(landmarks)
+  original_image_size = original_image_size.reshape(-1, 1)
 
   imsizes = [4, 8, 16, 32, 64, 128]
-  for imsize in imsizes:
-    shrink_factor_width = (image_width.float() / imsize).view(-1, 1)
-    shrink_factor_height = (image_height.float() / imsize).view(-1, 1)
-    
-    landmarks_resized = landmarks.float()
-    landmarks_resized[:, range(0, 10, 2)] /= shrink_factor_width
-    landmarks_resized[:, range(1,10, 2)] /= shrink_factor_height
-    landmarks_resized = landmarks_resized.long()
+  for imsize in tqdm(imsizes, desc="Saving landmarks"):
+    #shrink_factor_width = (image_width.float() / imsize).view(-1, 1)
+    #shrink_factor_height = (image_height.float() / imsize).view(-1, 1)
 
-   
+    landmarks_resized = landmarks.float()
+    landmarks_resized = landmarks_resized / original_image_size.float() * imsize
+
     assert landmarks_resized.shape == landmarks.shape
 
     target_path = os.path.join(target_dir, "{}.torch".format(imsize))
@@ -211,7 +210,7 @@ def save_landmarks(landmarks, target_dir, image_height, image_width):
 def load_and_adjust_bounding_box(image_start_indices, image_paths):
     bbox_df = pd.read_csv(bbox_file_path, skiprows=[0], delim_whitespace=True)
     bounding_boxes = []
-    for impath in image_paths:
+    for impath in tqdm(image_paths, desc="Loading and adjusting bounding boxes"):
         imname = os.path.basename(impath)
         image_id = int(imname.split(".")[0])
         d = bbox_df.iloc[image_id-1]
@@ -228,34 +227,21 @@ def load_and_adjust_bounding_box(image_start_indices, image_paths):
     bounding_boxes = torch.from_numpy(bounding_boxes)
     return bounding_boxes
 
-def load_and_adjust_landmarks(image_start_indices, image_paths):
-    landmark_df = pd.read_csv(landmark_file_path, skiprows=[0], delim_whitespace=True)
+def load_and_adjust_landmarks(image_start_indices, image_paths, landmark_df):
+    landmark_df = landmark_df.set_index("imname")
     landmarks = []
-    for impath in image_paths:
+    for impath in tqdm(image_paths, desc="Loading and adjusting landmarks"):
         imname = os.path.basename(impath)
-        image_id = int(imname.split(".")[0])
-        df = landmark_df.iloc[image_id-1]
-        assert df.name == imname, "Expected image ID to be identical: Expected: {}, was: {}".format(imname, df.image_id)
-        leye_x = df.lefteye_x
-        leye_y = df.lefteye_y
-        reye_x = df.righteye_x
-        reye_y = df.righteye_y
-        nose_x = df.nose_x
-        nose_y = df.nose_y
-        lmouth_x = df.leftmouth_x
-        lmouth_y = df.leftmouth_y
-        rmouth_x = df.rightmouth_x
-        rmouth_y = df.rightmouth_y
+        df = landmark_df.loc[imname]
         x0_exp, y0_exp = image_start_indices[impath]
-        leye_x, reye_x, nose_x, lmouth_x, rmouth_x = [x-x0_exp for x in [leye_x, reye_x, nose_x, lmouth_x, rmouth_x]]
-        leye_y, reye_y, nose_y, lmouth_y, rmouth_y = [y-y0_exp for y in [leye_y, reye_y, nose_y, lmouth_y, rmouth_y]]
-        to_save = [
-            leye_x, leye_y,
-            reye_x, reye_y,
-            nose_x, nose_y,
-            lmouth_x, lmouth_y,
-            rmouth_x, rmouth_y
-        ]
+        
+        #df = landmark_df.iloc[image_id-1]
+        #assert df.imname == imname, "Expected image ID to be identical: Expected: {}, was: {}".format(imname, df.image_id)
+        to_save = df.values.squeeze().astype("float")
+
+        assert len(to_save.shape) == 1
+        to_save[range(0, len(to_save), 2)] -= x0_exp
+        to_save[range(1, len(to_save), 2)] -= y0_exp
         landmarks.append(to_save)
     landmarks = np.array(landmarks)
     landmarks = torch.from_numpy(landmarks)
@@ -267,10 +253,18 @@ def dataset_to_torch(image_start_indices):
     # Save real
     target_original_dir = os.path.join(target_dir, "original")
     impaths = list(image_start_indices.keys())
-
-    num_jobs = 50
+    landmark_df = pd.read_csv("celeba_keypoints.csv")
+    landmark_impaths = set(landmark_df.imname.values)
+    impaths = [os.path.basename(impath) for impath in impaths]
+    impaths = set(impaths)
+    impaths = impaths.intersection(landmark_impaths)
+    #impaths = [impath for impath in impaths if os.path.basename(impath) in landmark_df.imname.values]
+    impaths = list(impaths)
+    impaths.sort(key=lambda x: int(x.split(".")[0]))
+    impaths = [os.path.join(TARGET_DIR, x) for x in impaths]
+    print("Remaining images:", len(impaths))
+    num_jobs = 200
     batch_size = math.ceil(len(impaths) / num_jobs)
-
     jobs = []
     with multiprocessing.Pool(16) as p:
       for i in range(num_jobs):
@@ -289,11 +283,16 @@ def dataset_to_torch(image_start_indices):
     assert original_image_height.shape == (len(impaths),)
     assert original_image_width.shape == (len(impaths),)
 
-    bounding_boxes = load_and_adjust_bounding_box(image_start_indices, impaths)
+    bounding_boxes = load_and_adjust_bounding_box(image_start_indices,  impaths)
     save_bounding_boxes(bounding_boxes, target_dir, original_image_height, original_image_width)
 
-    landmarks = load_and_adjust_landmarks(image_start_indices, impaths)
-    save_landmarks(landmarks, target_dir, original_image_height, original_image_width)
+    landmarks = load_and_adjust_landmarks(image_start_indices, impaths, landmark_df)
+    save_landmarks(landmarks, target_dir, original_image_height)
+
+    f = open("data/celeba_torch/idx_to_imname.csv", "w")
+    f.write("imname\n")
+    f.write("\n".join(impaths))
+    f.close()
 
 if __name__ == "__main__":
     image_start_indices = extract_anonymized()

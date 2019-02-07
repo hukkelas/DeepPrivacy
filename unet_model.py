@@ -62,8 +62,12 @@ class Generator(nn.Module):
             to_cuda(UnetDownSamplingBlock(start_channel_dim, start_channel_dim)),
         ])
         self.core_blocks_up = nn.ModuleList([
-            to_cuda(UnetUpsamplingBlock(start_channel_dim, start_channel_dim))
+            to_cuda(UnetUpsamplingBlock(start_channel_dim+1, start_channel_dim))
         ])
+        self.fc_pose = nn.Sequential(
+            nn.Linear(14, 16),
+            nn.LeakyReLU(0.2)
+        )
         self.new_up = nn.Sequential()
         self.old_up = nn.Sequential()
         self.new_down = nn.Sequential()
@@ -123,7 +127,7 @@ class Generator(nn.Module):
         
 
     # x: Bx1x1x512
-    def forward(self, x_in, z, dropout_rate=0.5):
+    def forward(self, x_in, z, pose_info):
         unet_skips = []
         if self.current_imsize != 4:
             old_down = self.from_rgb_old(x_in)
@@ -140,6 +144,11 @@ class Generator(nn.Module):
             x = block(x)
             unet_skips.append(x)
         x = self.core_blocks_down[-1](x)
+
+        pose_info = self.fc_pose(pose_info)
+        pose_info = pose_info.view(-1, 1, 4, 4)
+        x = torch.cat((x, pose_info), dim=1)
+
         x = self.core_blocks_up[0](x)
 
         for idx, block in enumerate(self.core_blocks_up[1:]):

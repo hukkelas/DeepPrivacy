@@ -23,6 +23,8 @@ if __name__ == "__main__":
 
     savedir = os.path.join("test_examples", "bounding_box_test")
     os.makedirs(savedir, exist_ok=True)
+    os.makedirs(os.path.join(savedir, "out"), exist_ok=True)
+    os.makedirs(os.path.join(savedir, "in"), exist_ok=True)
     CELEBA_DATA_DIR = os.path.join("data","celeba","img_celeba")
     CELEBA_BBOX_FILE = os.path.join("data","celeba","list_bbox_celeba.txt")
     ""
@@ -59,13 +61,13 @@ if __name__ == "__main__":
         
         
         im = cv2.resize(im, (imsize, imsize), interpolation=cv2.INTER_AREA)
-        plt.imsave("{}/{:.3f}in.jpg".format(savedir, p), im)
+        plt.imsave("{}/in/{:.3f}.jpg".format(savedir, p), im)
         
         im = to_tensor(im)[None, :, :, :]
         
         im = preprocess_images(im, 1.0).cuda()
-
-        im = g(im, None)
+        pose = torch.zeros((1, 14))
+        im = g(im, None, pose)
         im = normalize_img(im)
-        torchvision.utils.save_image(im.data, "{}/{:.3f}out.jpg".format(savedir, p))
+        torchvision.utils.save_image(im.data, "{}/out/{:.3f}.jpg".format(savedir, p))
     print("Results saved to:", savedir)
