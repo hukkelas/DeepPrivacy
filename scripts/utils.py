@@ -18,11 +18,11 @@ def image_to_numpy(images):
 def init_generator(checkpoint):
     start_channel_size = checkpoint["start_channel_size"]
     print("Start channel size:", start_channel_size)
-    noise_dim = checkpoint["noise_dim"]
+    pose_dim = checkpoint["pose_dim"]
     image_channels = checkpoint["image_channels"]
     transition_step = checkpoint["transition_step"]
     transition_value = checkpoint["transition_variable"]
-    g = Generator(noise_dim, start_channel_size, image_channels)
+    g = Generator(pose_dim, start_channel_size, image_channels)
     g = DataParallellWrapper(g)
     init_model(start_channel_size, transition_step, g)
     g = to_cuda(g)

@@ -164,12 +164,12 @@ from matplotlib.patches import Polygon
 """
 keypoint indices: 
 'nose',
-'left_eye',
 'right_eye',
-'left_ear',
+'left_eye',
 'right_ear',
-'left_shoulder',
+'left_ear',
 'right_shoulder',
+'left_shoulder',
 """
 def extract_keypoints(
         im, output_dir, boxes, segms=None, keypoints=None, thresh=0.9,

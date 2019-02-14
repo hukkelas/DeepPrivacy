@@ -19,7 +19,7 @@ def load_torch_files(dirpath):
 
 
 def load_ffhq_condition(batch_size, imsize=128):
-    return ConditionedCelebADataset("data/ffhq_torch", imsize, batch_size)
+    return ConditionedCelebADataset("data/ffhq_torch", imsize, batch_size, landmarks_total=False)
 
 
 def load_celeba_condition(batch_size, imsize=128):
@@ -80,7 +80,7 @@ def cut_bounding_box(condition, bounding_boxes):
 
 class ConditionedCelebADataset:
 
-    def __init__(self, dirpath, imsize, batch_size):
+    def __init__(self, dirpath, imsize, batch_size, landmarks_total=False):
         self.images = load_torch_files(
             os.path.join(dirpath, "original", str(imsize)))
         bounding_box_filepath = os.path.join(
@@ -89,8 +89,12 @@ class ConditionedCelebADataset:
             bounding_box_filepath)
         self.bounding_boxes = torch.load(bounding_box_filepath).long()
 
-        landmark_filepath = os.path.join(
-            dirpath, "landmarks", "{}.torch".format(imsize))
+        if landmarks_total:
+            landmark_filepath = os.path.join(
+                dirpath, "landmarks_total", "{}.torch".format(imsize))
+        else:
+            landmark_filepath = os.path.join(
+                dirpath, "landmarks", "{}.torch".format(imsize))
         assert os.path.isfile(
             landmark_filepath), "Did not find the landmark data. Looked in: {}".format(landmark_filepath)
         self.landmarks = torch.load(landmark_filepath).float() / imsize
