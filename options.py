@@ -7,26 +7,24 @@ DEFAULT_NUM_EPOCHS = 500
 DEFAULT_BATCH_SIZE = "256,256,256,128,46,24,8,7,7" # V100-32GB settings
 DEFAULT_N_CRITIC = 1
 DEFAULT_LEARNING_RATE = 0.00125
-DEFAULT_NOISE_DIM = 256
 DEFAULT_IMSIZE = 4
 DEFAULT_MAX_IMSIZE = 128
 DEFAULT_START_CHANNEL_SIZE = 256
-DEFALUT_DATASET = "celeba_condition"
+DEFALUT_DATASET = "celeba"
 DEFAULT_TRANSITION_ITERS = 12e5
 DEFAULT_GENERATOR_RUNNING_AVERAGE_DECAY = 0.999
+DEFAULT_POSE_SIZE = 14
 OPTIONS_DIR = "options"
 os.makedirs(OPTIONS_DIR, exist_ok=True)
-# 4 -> 8 // 128 -> 64
-# 8 -> 16 // 64 -> 32
-# 16 -> 32 // 32 -> 16
-# 
+
 
 def validate_start_channel_size(max_imsize, start_channel_size):
     # Assert start channel size is valid with the max imsize
-    # Number of times to double 
+    # Number of times to double
     n_image_double =  math.log(max_imsize, 2) - 2 # starts at 4
     n_channel_halving = math.log(start_channel_size, 2)
     assert n_image_double < n_channel_halving
+
 
 def print_options(dic):
     #dic = vars(options)
@@ -39,11 +37,13 @@ def print_options(dic):
         print("{:<16} {}".format(key, item))
     print("="*80)
 
+
 def write_options(options, name):
     path = os.path.join(OPTIONS_DIR, name, "options.json")
     os.makedirs(os.path.join(OPTIONS_DIR, name), exist_ok=True)
     with open(path, "w") as f:
         json.dump(options, f)
+
 
 def load_options():
     parser = OptionParser()
@@ -56,9 +56,9 @@ def load_options():
     parser.add_option("-l", "--learning-rate", dest="learning_rate",
                       help="Set learning rate",
                       default=DEFAULT_LEARNING_RATE, type=float)
-    parser.add_option("-z", "--noise-dim", dest="noise_dim",
-                      help="Set dimension of noise data.",
-                      default=DEFAULT_NOISE_DIM, type=int)
+    parser.add_option("-p", "--pose-size", dest="pose_size",
+                      help="Set dimension of pose information.",
+                      default=DEFAULT_POSE_SIZE, type=int)
     parser.add_option("-e", "--num-epochs", dest="num_epochs",
                       help="Set number of epochs",
                       default=DEFAULT_NUM_EPOCHS, type=int)
@@ -84,9 +84,8 @@ def load_options():
                       help="Set the decay rate for the running average of the generator",
                       default=DEFAULT_GENERATOR_RUNNING_AVERAGE_DECAY,
                       type=float)
-            
-    options, _ = parser.parse_args()
 
+    options, _ = parser.parse_args()
 
     validate_start_channel_size(options.max_imsize, options.start_channel_size)
 
@@ -100,20 +99,14 @@ def load_options():
         options.summaries_dir = os.path.join(options.summaries_dir, str(0))
     os.makedirs(options.checkpoint_dir, exist_ok=True)
     os.makedirs(options.generated_data_dir, exist_ok=True)
-    
 
-    # Image channels
-    if options.dataset == "mnist":
-        options.image_channels = 1
-    else:
-        options.image_channels = 3
-    imsizes = [4*2**i for i in range(0,9)]
+    imsizes = [4*2**i for i in range(0, 9)]
     print(len(imsizes))
     batch_sizes = options.batch_size.split(",")
     print(len(batch_sizes))
     scheduled_batch_size = {imsize: int(batch_sizes[i]) for i, imsize in enumerate(imsizes)}
 
-    options.batch_size = scheduled_batch_size 
+    options.batch_size = scheduled_batch_size
 
     print_options(vars(options))
     write_options(vars(options), options.model_name)
@@ -122,5 +115,3 @@ def load_options():
 
 if __name__ == '__main__':
     load_options()
-
-    

@@ -1,111 +1,7 @@
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 import torch
 import os
-import numpy as np
 import utils
 import glob
-
-def load_mnist(batch_size, imsize=32):
-    transform = [
-        transforms.Pad(2)
-    ]
-    if imsize != 32:
-        transform +=  [transforms.Resize([imsize, imsize])]
-    transform += [
-        transforms.ToTensor(),
-    ]
-    transform = transforms.Compose(transform)
-    imagenet_data = datasets.MNIST('data/mnist_data', 
-                                train=True, 
-                                download=True,
-                                transform=transform)
-    data_loader = torch.utils.data.DataLoader(imagenet_data,
-                                            batch_size=batch_size,
-                                            shuffle=True,
-                                            num_workers=4)
-    return data_loader
-
-
-
-def load_cifar10(batch_size, imsize=32):
-    transform = []
-    if imsize != 32:
-        transform +=  [transforms.Resize([imsize, imsize])]
-    transform += [
-        transforms.RandomHorizontalFlip(0.5),
-        transforms.ToTensor(),
-        #transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-    ]
-    transform = transforms.Compose(transform)
-    imagenet_data = datasets.CIFAR10('data/cifar10', 
-                                train=True, 
-                                download=True,
-                                transform=transform)
-    data_loader = torch.utils.data.DataLoader(imagenet_data,
-                                            batch_size=batch_size,
-                                            shuffle=True,
-                                            num_workers=4)
-    return data_loader
-
-def load_pokemon(batch_size, imsize=96):
-    transform = []
-    if imsize != 96:
-        transform +=  [transforms.Resize([imsize, imsize])]
-    transform += [
-        transforms.RandomHorizontalFlip(.5),
-        transforms.ToTensor(),
-    ]
-    transform = transforms.Compose(transform)
-    imagenet_data = datasets.ImageFolder("data/pokemons", transform=transform)
-    data_loader = torch.utils.data.DataLoader(imagenet_data,
-                                            batch_size=batch_size,
-                                            shuffle=True,
-                                            num_workers=4)
-    return data_loader
-
-
-def load_celeba(batch_size, imsize=128):
-    return CelebAGenerator("data/celebahq_torch", imsize, batch_size)
-class CelebAGenerator:
-
-    def __init__(self, dirpath, imsize, batch_size):
-        filepath = os.path.join(dirpath, "{}.torch".format(imsize))
-        assert os.path.isfile(filepath), "Did not find file in filepath:{}".format(filepath)
-        images = torch.load(filepath)
-        assert images.dtype == torch.float32
-        expected_shape = (3, imsize, imsize)
-        assert images.shape[1:] == expected_shape, "Shape was: {}. Expected: {}".format(images.shape[1:], expected_shape)
-        self.images = images
-        self.n_samples = images.shape[0]
-        self.batch_size = batch_size
-        self.indices = torch.LongTensor(self.batch_size)
-        self.ones = torch.ones(self.batch_size, dtype=torch.long)
-        self.max = self.n_samples // self.batch_size
-
-    
-    def __len__(self):
-        return self.images.shape[0]
-
-    def __iter__(self):
-        self.n = 0
-        return self
-    
-    def __next__(self):
-        if self.n > self.max:
-            raise StopIteration
-        self.n += 1
-        indices = self.indices.random_(0, self.n_samples)
-        images = self.images[indices]
-        to_flip = torch.rand(self.batch_size) > 0.5
-        try:
-            images[to_flip] = utils.flip_horizontal(images[to_flip])
-        except:
-            print("failed")
-        return images, self.ones
-
-
-    
 
 
 def load_torch_files(dirpath):
@@ -122,15 +18,19 @@ def load_torch_files(dirpath):
     return images
 
 
+def load_ffhq_condition(batch_size, imsize=128):
+    return ConditionedCelebADataset("data/ffhq_torch", imsize, batch_size)
+
+
 def load_celeba_condition(batch_size, imsize=128):
     return ConditionedCelebADataset("data/celeba_torch", imsize, batch_size)
-
 
 
 def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
     # Data augment width and height by percentage of width.
     # Bounding box will preserve its center.
-    shrink_percentage = torch.zeros((bounding_boxes.shape[0])).float().uniform_(-percentage, percentage)
+    shrink_percentage = torch.zeros(
+        (bounding_boxes.shape[0])).float().uniform_(-percentage, percentage)
     width = (bounding_boxes[:, 2] - bounding_boxes[:, 0]).float()
     height = (bounding_boxes[:, 3] - bounding_boxes[:, 1]).float()
 
@@ -148,6 +48,7 @@ def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
     bounding_boxes[:, 3][bounding_boxes[:, 3] > imsize] = imsize
     return bounding_boxes
 
+
 def bbox_to_coordinates(bounding_boxes):
     x0 = bounding_boxes[:, 0]
     y0 = bounding_boxes[:, 0]
@@ -155,7 +56,7 @@ def bbox_to_coordinates(bounding_boxes):
     y1 = y0 + bounding_boxes[:, 3]
     bounding_boxes[:, 2] = x1
     bounding_boxes[:, 3] = y1
-    return bounding_boxes    
+    return bounding_boxes
 
 
 def cut_bounding_box(condition, bounding_boxes):
@@ -164,28 +65,42 @@ def cut_bounding_box(condition, bounding_boxes):
     x1 = bounding_boxes[:, 2]
     y1 = bounding_boxes[:, 3]
     for i in range(condition.shape[0]):
-        condition[i, :, y0[i]:y1[i], x0[i]:x1[i]] = 0
+        previous_image = condition[i, :, y0[i]:y1[i], x0[i]:x1[i]]
+        mean = previous_image.mean()
+        std = previous_image.std()
+        if previous_image.shape[1] == 0 or previous_image.shape[2] == 0:
+            continue
+        previous_image[:, :, :] = utils.truncated_normal(mean,
+                                                         std,
+                                                         previous_image.shape,
+                                                         previous_image.max(),
+                                                         previous_image.min())
     return condition
 
 
 class ConditionedCelebADataset:
 
     def __init__(self, dirpath, imsize, batch_size):
-        self.images = load_torch_files(os.path.join(dirpath, "original", str(imsize)))
-        bounding_box_filepath = os.path.join(dirpath, "bounding_box", "{}.torch".format(imsize))
-        assert os.path.isfile(bounding_box_filepath), "Did not find the bounding box data. Looked in: {}".format(bounding_box_filepath)
-        self.bounding_boxes = torch.load(bounding_box_filepath)
-        
-        landmark_filepath = os.path.join(dirpath, "landmarks", "{}.torch".format(imsize))
-        assert os.path.isfile(landmark_filepath), "Did not find the landmark data. Looked in: {}".format(landmark_filepath)
+        self.images = load_torch_files(
+            os.path.join(dirpath, "original", str(imsize)))
+        bounding_box_filepath = os.path.join(
+            dirpath, "bounding_box", "{}.torch".format(imsize))
+        assert os.path.isfile(bounding_box_filepath), "Did not find the bounding box data. Looked in: {}".format(
+            bounding_box_filepath)
+        self.bounding_boxes = torch.load(bounding_box_filepath).long()
+
+        landmark_filepath = os.path.join(
+            dirpath, "landmarks", "{}.torch".format(imsize))
+        assert os.path.isfile(
+            landmark_filepath), "Did not find the landmark data. Looked in: {}".format(landmark_filepath)
         self.landmarks = torch.load(landmark_filepath).float() / imsize
 
-        #self.bounding_boxes = bbox_to_coordinates(self.bounding_boxes)
         assert self.landmarks.shape[0] == self.bounding_boxes.shape[0]
         assert self.bounding_boxes.shape[0] == self.images.shape[0], "The number \
             of samples of images doesn't match number of bounding boxes. Images: {}, bbox: {}".format(self.images.shape[0], self.bounding_boxes.shape[0])
         expected_imshape = (3, imsize, imsize)
-        assert self.images.shape[1:] == expected_imshape, "Shape was: {}. Expected: {}".format(self.images.shape[1:], expected_imshape)
+        assert self.images.shape[1:] == expected_imshape, "Shape was: {}. Expected: {}".format(
+            self.images.shape[1:], expected_imshape)
         print("Dataset loaded. Number of samples:", self.images.shape)
         self.n_samples = self.images.shape[0]
         self.batch_size = batch_size
@@ -194,34 +109,37 @@ class ConditionedCelebADataset:
         self.validation_size = int(self.n_samples*0.05)
         self.imsize = imsize
 
-    
     def __len__(self):
         return self.images.shape[0] // self.batch_size
 
     def __iter__(self):
         self.n = 0
         return self
-    
+
     def __next__(self):
         if self.n > self.batches_per_epoch:
             raise StopIteration
         self.n += 1
-        indices = self.indices.random_(0, self.n_samples - self.validation_size)
+        indices = self.indices.random_(
+            0, self.n_samples - self.validation_size)
         images = self.images[indices]
         bounding_boxes = self.bounding_boxes[indices]
-        landmarks = self.landmarks[indices] # only left eye, right eye, nose
-        bounding_boxes = bounding_box_data_augmentation(bounding_boxes, self.imsize, 0.2)
+        landmarks = self.landmarks[indices]  # only left eye, right eye, nose
+        bounding_boxes = bounding_box_data_augmentation(
+            bounding_boxes, self.imsize, 0.2)
         condition = images.clone()
         condition = cut_bounding_box(condition, bounding_boxes)
         to_flip = torch.rand(self.batch_size) > .5
         try:
             images[to_flip] = utils.flip_horizontal(images[to_flip])
             condition[to_flip] = utils.flip_horizontal(condition[to_flip])
-            landmarks[to_flip][:, range(0, landmarks.shape[1], 2)] = 1 - landmarks[to_flip][:, range(0, landmarks.shape[1], 2)] # Flip the x-values
+            landmarks[to_flip][:, range(0, landmarks.shape[1], 2)] = 1 - \
+                landmarks[to_flip][:, range(
+                    0, landmarks.shape[1], 2)]  # Flip the x-values
         except Exception as e:
             print("Could not flip images.", e)
         return images, condition, landmarks
-    
+
     def validation_set_generator(self):
         validation_iters = self.validation_size // self.batch_size
         validation_offset = self.n_samples - self.validation_size
