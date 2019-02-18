@@ -14,7 +14,7 @@ from metrics import fid
 torch.backends.cudnn.benchmark = True
 
 
-def gradient_penalty(real_data, fake_data, discriminator, condition):
+def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() - 1)
     epsilon = torch.rand(epsilon_shape)
     epsilon = to_cuda(epsilon)
@@ -22,7 +22,7 @@ def gradient_penalty(real_data, fake_data, discriminator, condition):
     x_hat = epsilon * real_data + (1-epsilon) * fake_data.detach()
     x_hat = to_cuda(Variable(x_hat, requires_grad=True))
 
-    logits, _ = discriminator(x_hat, condition)
+    logits = discriminator(x_hat, condition, landmarks)
     grad = torch.autograd.grad(
         outputs=logits,
         inputs=x_hat,
@@ -329,9 +329,9 @@ class Trainer:
             landmarks = to_cuda(landmarks)
             fake_data = self.running_average_generator(condition,
                                                        landmarks)
-            real_score, real_logits = self.discriminator(real_data, condition)
-            fake_score, fake_logits = self.discriminator(fake_data.detach(),
-                                                         condition)
+            real_score = self.discriminator(real_data, condition, landmarks)
+            fake_score = self.discriminator(fake_data.detach(), condition,
+                                            landmarks)
             wasserstein_distance = (real_score - fake_score).squeeze()
             epsilon_penalty = (real_score**2).squeeze()
             real_scores.append(real_score.mean().item())
@@ -389,16 +389,16 @@ class Trainer:
                 # Forward G
                 fake_data = self.generator(condition, landmarks)
                 # Train Discriminator
-                real_scores, real_logits = self.discriminator(
-                    real_data, condition)
-                fake_scores, fake_logits = self.discriminator(
-                    fake_data.detach(), condition)
+                real_scores = self.discriminator(
+                    real_data, condition, landmarks)
+                fake_scores = self.discriminator(
+                    fake_data.detach(), condition, landmarks)
 
                 # Wasserstein-1 Distance
                 wasserstein_distance = (real_scores - fake_scores).squeeze()
                 gradient_pen = gradient_penalty(
                     real_data.data, fake_data.detach(), self.discriminator,
-                    condition)
+                    condition, landmarks)
                 # Epsilon penalty
                 epsilon_penalty = (real_scores ** 2).squeeze()
 
@@ -412,8 +412,8 @@ class Trainer:
                 self.d_optimizer.step()
 
                 # Forward G
-                fake_scores, fake_logits = self.discriminator(
-                    fake_data, condition)
+                fake_scores = self.discriminator(
+                    fake_data, condition, landmarks)
 
                 G_loss = (-fake_scores).mean()
 
