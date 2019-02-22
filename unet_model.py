@@ -43,24 +43,26 @@ class UnetUpsamplingBlock(nn.Module):
 
 def generate_pose_channel_images(min_imsize, max_imsize, device, pose_information):
     batch_size = pose_information.shape[0]
+    num_poses = pose_information.shape[1] // 2
     pose_x = pose_information[:, range(0, pose_information.shape[1], 2)].view(-1)
     pose_y = pose_information[:, range(1, pose_information.shape[1], 2)].view(-1)
-    legal_mask = ((pose_x < 0 ) + (pose_x >= 1.0) + (pose_y <0) + (pose_y >= 1.0)) == 0
-    batch_idx = torch.cat([torch.ones(pose_information.shape[1]//2)*k for k in range(batch_size)]).long()
-
-    pose_x = pose_x[legal_mask]
-    pose_y = pose_y[legal_mask]
-    batch_idx = batch_idx[legal_mask]
-
-
+    
+    batch_idx = torch.cat([torch.ones(num_poses)*k for k in range(batch_size)]).long()
+    pose_idx = torch.arange(0, num_poses).repeat(batch_size)
+    
+    # All poses that are outside image, we move to the last pose channel
+    illegal_mask = ((pose_x < 0) + (pose_x >= 1.0) + (pose_y < 0) + (pose_y >= 1.0)) != 0
+    pose_idx[illegal_mask] = num_poses
+    pose_x[illegal_mask] = 0
+    pose_y[illegal_mask] = 0
     pose_images = []
     imsize = min_imsize
     while imsize <= max_imsize:
-        new_im = torch.zeros((batch_size, 1, imsize, imsize))
+        new_im = torch.zeros((batch_size, num_poses+1, imsize, imsize))
         px = (pose_x * imsize).long()
         py = (pose_y * imsize).long()
-        new_im[batch_idx, 0, py, px] = 1
-        new_im = new_im.to(device)
+        new_im[batch_idx, pose_idx, py, px] = 1
+        new_im = new_im[:, :-1].to(device) # Remove "throwaway" channel
         pose_images.append(new_im)
         imsize *= 2
     return pose_images
@@ -76,6 +78,7 @@ class Generator(nn.Module):
         # Transition blockss
         self.image_channels = image_channels
         self.transition_value = 1.0
+        self.num_poses = pose_size // 2
         self.to_rgb_new = WSConv2d(start_channel_dim, self.image_channels, 1, 0)
         self.to_rgb_old = WSConv2d(start_channel_dim, self.image_channels, 1, 0)
 
@@ -83,7 +86,7 @@ class Generator(nn.Module):
             to_cuda(UnetDownSamplingBlock(start_channel_dim, start_channel_dim)),
         ])
         self.core_blocks_up = nn.ModuleList([
-            to_cuda(UnetUpsamplingBlock(start_channel_dim+1, start_channel_dim))
+            to_cuda(UnetUpsamplingBlock(start_channel_dim+self.num_poses, start_channel_dim))
         ])
 
         self.new_up = nn.Sequential()
@@ -138,7 +141,7 @@ class Generator(nn.Module):
             WSConv2d(output_dim, self.image_channels, 1, 0))
 
         self.new_up = to_cuda(nn.Sequential(
-            UnetUpsamplingBlock(self.prev_channel_size*2+1, output_dim)
+            UnetUpsamplingBlock(self.prev_channel_size*2+self.num_poses, output_dim)
         ))
         self.prev_channel_size = output_dim
 
@@ -196,9 +199,11 @@ class Discriminator(nn.Module):
     def __init__(self, 
                  in_channels,
                  imsize,
-                 start_channel_dim
+                 start_channel_dim,
+                 pose_size
                  ):
         super(Discriminator, self).__init__()
+        self.num_poses = pose_size // 2
         self.image_channels = in_channels
         self.current_input_imsize = 4
         self.from_rgb_new = conv_module_bn(in_channels*2, start_channel_dim, 1, 0)
@@ -207,7 +212,7 @@ class Discriminator(nn.Module):
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
             nn.Sequential(
-                conv_module_bn(start_channel_dim+1, start_channel_dim, 3, 1),
+                conv_module_bn(start_channel_dim + self.num_poses, start_channel_dim, 3, 1),
                 conv_module_bn(start_channel_dim, start_channel_dim, 4, 0),
             )
         )
@@ -230,7 +235,7 @@ class Discriminator(nn.Module):
         self.from_rgb_new = conv_module_bn(self.image_channels*2, input_dim, 1, 0)
         self.from_rgb_new = to_cuda(self.from_rgb_new)
         self.new_block = nn.Sequential(
-            conv_module_bn(input_dim+1, input_dim, 3, 1),
+            conv_module_bn(input_dim+self.num_poses, input_dim, 3, 1),
             conv_module_bn(input_dim, output_dim, 3, 1),
             nn.AvgPool2d([2, 2])
         )

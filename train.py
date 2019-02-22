@@ -57,7 +57,8 @@ class DataParallellWrapper(torch.nn.Module):
 def init_model(imsize, pose_size, start_channel_dim, image_channels):
     discriminator = Discriminator(image_channels,
                                   imsize,
-                                  int(start_channel_dim*2**0.5))
+                                  int(start_channel_dim*2**0.5),
+                                  pose_size)
     discriminator = DataParallellWrapper(discriminator)
     generator = Generator(pose_size, start_channel_dim, image_channels)
     generator = DataParallellWrapper(generator)
