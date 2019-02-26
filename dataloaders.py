@@ -140,7 +140,7 @@ class ConditionedCelebADataset:
                     0, landmarks.shape[1], 2)]  # Flip the x-values
         except Exception as e:
             print("Could not flip images.", e)
-        return images.half(), condition.half(), landmarks.half()
+        return images, condition, landmarks
 
     def validation_set_generator(self):
         validation_iters = self.validation_size // self.batch_size

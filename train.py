@@ -420,7 +420,7 @@ class Trainer:
 
                 self.d_optimizer.zero_grad()
                 self.g_optimizer.zero_grad()
-                G_loss.backward()
+                G_loss.bacward()
                 self.g_optimizer.step()
 
                 nsec_per_img = (
