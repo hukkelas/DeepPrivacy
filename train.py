@@ -11,7 +11,10 @@ from options import load_options, print_options
 import time
 import numpy as np
 from metrics import fid
+#from apex.fp16_utils import FP16_Optimizer
+#from apex.optimizers import FusedAdam
 torch.backends.cudnn.benchmark = True
+assert torch.backends.cudnn.enabled
 
 
 def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
@@ -38,14 +41,14 @@ class DataParallellWrapper(torch.nn.Module):
     def __init__(self, model):
         super().__init__()
         self.model = model
-        self.forward_block = torch.nn.DataParallel(self.model)
+        self.forward_block = self.model
 
     def forward(self, *x):
         return self.forward_block(*x)
 
     def extend(self, channel_size):
         self.model.extend(channel_size)
-        self.forward_block = torch.nn.DataParallel(self.model)
+        self.forward_block = self.model
 
     def summary(self):
         self.model.summary()
@@ -150,20 +153,22 @@ class Trainer:
             current_channels//32,
         ]
         self.start_time = time.time()
+        self.writer = tensorboardX.SummaryWriter(options.summaries_dir)
+        self.validation_writer = tensorboardX.SummaryWriter(
+            os.path.join(options.summaries_dir, "validation"))
         if not self.load_checkpoint():
             self.discriminator, self.generator = init_model(options.imsize,
                                                             self.pose_size,
                                                             options.start_channel_size,
                                                             self.image_channels)
-            self.init_optimizers()
             self.init_running_average_generator()
+            self.extend_models()
+
+            self.init_optimizers()
         self.data_loader = load_dataset(self.dataset,
                                         self.batch_size,
                                         self.current_imsize)
 
-        self.writer = tensorboardX.SummaryWriter(options.summaries_dir)
-        self.validation_writer = tensorboardX.SummaryWriter(
-            os.path.join(options.summaries_dir, "validation"))
 
         self.log_variable("stats/batch_size", self.batch_size)
         self.discriminator.update_transition_value(self.transition_variable)
@@ -280,10 +285,24 @@ class Trainer:
             self.running_average_generator)
         for i in range(self.transition_step):
             self.extend_running_average_generator(self.transition_channels[i])
+        #self.running_average_generator = self.running_average_generator.float()
 
     def extend_running_average_generator(self, current_channels):
         g = self.running_average_generator
         g.extend(current_channels)
+        #g = self.running_average_generator.float()
+
+    def extend_models(self):
+        current_channels = self.transition_channels[self.transition_step]
+        self.discriminator.extend(int(current_channels*2**0.5))
+        self.generator.extend(current_channels)
+        self.extend_running_average_generator(current_channels)
+
+        self.current_imsize *= 2
+
+        self.batch_size = self.batch_size_schedule[self.current_imsize]
+        self.log_variable("stats/batch_size", self.batch_size)
+        self.transition_step += 1
 
     def update_running_average_generator(self):
         for avg_parameter, current_parameter in zip(
@@ -296,9 +315,11 @@ class Trainer:
         self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(),
                                             lr=self.learning_rate,
                                             betas=(0.0, 0.99))
+        #self.d_optimizer = FP16_Optimizer(self.d_optimizer, dynamic_loss_scale=True)
         self.g_optimizer = torch.optim.Adam(self.generator.parameters(),
                                             lr=self.learning_rate,
                                             betas=(0.0, 0.99))
+        #self.g_optimizer = FP16_Optimizer(self.g_optimizer, dynamic_loss_scale=True)
 
     def log_variable(self, name, value, log_to_validation=False):
         if log_to_validation:
@@ -345,8 +366,8 @@ class Trainer:
 
             start_idx = idx*self.batch_size
             end_idx = (idx+1)*self.batch_size
-            real_images[start_idx:end_idx] = real_data.cpu().data
-            fake_images[start_idx:end_idx] = fake_data.cpu().data
+            real_images[start_idx:end_idx] = real_data.cpu().float()
+            fake_images[start_idx:end_idx] = fake_data.cpu().float()
             del real_data, fake_data, real_score, fake_score
         if self.current_imsize >= 64:
             fid_val = fid.calculate_fid(real_images, fake_images, 8)
@@ -367,6 +388,7 @@ class Trainer:
 
     def train(self):
         for epoch in range(self.start_epoch, self.num_epochs):
+
             for i, (real_data, condition, landmarks) in enumerate(
                     self.data_loader):
                 batch_start_time = time.time()
@@ -420,7 +442,7 @@ class Trainer:
 
                 self.d_optimizer.zero_grad()
                 self.g_optimizer.zero_grad()
-                G_loss.bacward()
+                G_loss.backward()
                 self.g_optimizer.step()
 
                 nsec_per_img = (
@@ -483,16 +505,7 @@ class Trainer:
                             self.transition_variable)
                         self.save_checkpoint(epoch)
                     elif self.current_imsize < self.max_imsize:
-                        current_channels = self.transition_channels[self.transition_step]
-                        self.discriminator.extend(int(current_channels*2**0.5))
-                        self.generator.extend(current_channels)
-                        self.extend_running_average_generator(current_channels)
-
-                        self.current_imsize *= 2
-
-                        self.batch_size = self.batch_size_schedule[self.current_imsize]
-                        self.log_variable("stats/batch_size", self.batch_size)
-
+                        self.extend_models()
                         del self.data_loader
                         self.data_loader = load_dataset(
                             self.dataset, self.batch_size, self.current_imsize)
@@ -515,7 +528,6 @@ class Trainer:
                         torchvision.utils.save_image(
                             fake_data_sample[:100], filepath, nrow=10)
                         # self.log_model_graphs()
-                        self.transition_step += 1
                         self.save_checkpoint(epoch)
 
                         break
