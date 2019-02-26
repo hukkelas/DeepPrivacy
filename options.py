@@ -101,15 +101,14 @@ def load_options():
     os.makedirs(options.generated_data_dir, exist_ok=True)
 
     imsizes = [4*2**i for i in range(0, 9)]
-    print(len(imsizes))
     batch_sizes = options.batch_size.split(",")
-    print(len(batch_sizes))
     scheduled_batch_size = {imsize: int(batch_sizes[i]) for i, imsize in enumerate(imsizes)}
 
     options.batch_size = scheduled_batch_size
 
+
     print_options(vars(options))
-    write_options(vars(options), options.model_name)
+    write_options(vars(options), options.model_name)        
     return options
 
 

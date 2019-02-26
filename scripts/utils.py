@@ -3,6 +3,8 @@ from unet_model import Generator
 from train import DataParallellWrapper
 from utils import to_cuda, init_model
 import numpy as np
+import matplotlib.pyplot as plt
+
 def image_to_numpy(images):
     single_image = False
     if len(images.shape) == 3:
@@ -18,7 +20,7 @@ def image_to_numpy(images):
 def init_generator(checkpoint):
     start_channel_size = checkpoint["start_channel_size"]
     print("Start channel size:", start_channel_size)
-    pose_dim = checkpoint["pose_dim"]
+    pose_dim = checkpoint["pose_size"]
     image_channels = checkpoint["image_channels"]
     transition_step = checkpoint["transition_step"]
     transition_value = checkpoint["transition_variable"]
@@ -38,3 +40,11 @@ def get_model_name():
     argv = sys.argv
     assert len(sys.argv) == 2, "Expected argument length of 1. Run the script with \"python -m scripts.generate_final_images\" [model_name]"
     return argv[-1]
+
+
+def plot_pose(pose, imsize, x_offset=0):
+    pose = pose.squeeze() * imsize
+    assert pose.size == pose.shape[0]
+    x = pose[range(0, len(pose,), 2)]
+    y = pose[range(1, len(pose), 2)]
+    plt.plot(x + x_offset, y, "o")
