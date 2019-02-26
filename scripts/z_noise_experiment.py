@@ -25,59 +25,46 @@ if __name__ == "__main__":
 
     dataloader = load_celeba_condition(1, ckpt["current_imsize"])
 
-    savedir = os.path.join("test_examples", "bounding_box_test")
+    savedir = os.path.join("test_examples", "z_noise_test")
     os.makedirs(savedir, exist_ok=True)
-    os.makedirs(os.path.join(savedir, "out"), exist_ok=True)
-    os.makedirs(os.path.join(savedir, "in"), exist_ok=True)
-    os.makedirs(os.path.join(savedir, "debug"), exist_ok=True)
     g = init_generator(ckpt)
     imsize = ckpt["current_imsize"]
     g.eval()
 
     # Read bounding box annotations
     idx = -5
-    
+
     orig = dataloader.images[idx:idx+1]
     pose = dataloader.landmarks[idx:idx+1]
-    print(dataloader.bounding_boxes.shape)
     x0, y0, x1, y1 = dataloader.bounding_boxes[idx].numpy()
     width = x1 - x0
     height = y1 - y0
     assert orig.max() <= 1.0
-    
-    percentages = np.linspace(-0.3, 0.3, 100)
-    for i in range(100):
-        p = percentages[i]
-        x0_altered = x0 - int(p*width)
-        x1_altered = x1 + int(p*width)
-        y0_altered = max(y0 - int(p*height), 0)
-        y1_altered = min(y1 + int(p*height), imsize)
+
+    to_save = image_to_numpy(orig.squeeze())
+    num_iterations = 20
+    max_levels = np.linspace(0.2, 2.0, num_iterations)
+    for i in range(num_iterations):
         im = orig.clone()
-        
-        to_replace = im[:, :, y0_altered:y1_altered, x0_altered:x1_altered]
+        to_replace = im[:, :, y0:y1, x0:x1]
         m = (to_replace / im.max()).mean()
         s = (to_replace / im.max()).std()
-
-        norm = utils.truncated_normal(m, s, to_replace.shape, 1, 0)
+        max_level = max_levels[i]
+        if max_level == 0:
+            norm = torch.zeros_like(to_replace)
+        else:
+            norm = utils.truncated_normal_old(m, s, to_replace.shape, m+max_level, m-max_level)
+        print(norm.max(), norm.min())
         to_replace[:, :, :, :] = norm
         assert list(im.shape) == [1, 3, imsize, imsize], "Shape was:{}".format(im.shape)
 
-        torchvision.utils.save_image(im.data, "{}/in/{:.3f}.jpg".format(savedir, percentages[i]))
-        to_debug = image_to_numpy(im.squeeze())
         im = preprocess_images(im, 1.0).cuda()
-        #pose = torch.zeros((1, 14))
         im = g(im, pose)
         im = normalize_img(im)
         
-        torchvision.utils.save_image(im.data, "{}/out/{:.3f}.jpg".format(savedir, percentages[i]))
-
         im = image_to_numpy(im.squeeze())
-        to_debug = np.concatenate((to_debug, im), axis=1)
-        plt.figure(figsize=(24, 12))
-        plt.imshow(to_debug)
-        plot_pose(pose.numpy(), imsize, 0)
-        plot_pose(pose.numpy(), imsize, imsize)
-        plt.savefig(os.path.join(savedir, "debug", "{:.3f}.jpg".format(percentages[i])))
-        plt.close()
+        to_save = np.concatenate((to_save, im), axis=1)
+    savepath = os.path.join(savedir, "result_image_trunc.jpg")
+    plt.imsave(savepath, to_save)
 
     print("Results saved to:", savedir)

@@ -106,8 +106,6 @@ def load_options():
 
     options.batch_size = scheduled_batch_size
 
-    if options.dataset == "ffhq":
-        options.pose_size = 10
 
     print_options(vars(options))
     write_options(vars(options), options.model_name)        

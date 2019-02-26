@@ -19,7 +19,7 @@ def load_torch_files(dirpath):
 
 
 def load_ffhq_condition(batch_size, imsize=128):
-    return ConditionedCelebADataset("data/ffhq_torch", imsize, batch_size, landmarks_total=False)
+    return ConditionedCelebADataset("data/ffhq_unaligned_torch", imsize, batch_size, landmarks_total=False)
 
 
 def load_celeba_condition(batch_size, imsize=128):
