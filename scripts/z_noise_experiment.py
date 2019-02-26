@@ -53,7 +53,7 @@ if __name__ == "__main__":
         if max_level == 0:
             norm = torch.zeros_like(to_replace)
         else:
-            norm = utils.truncated_normal_old(m, s, to_replace.shape, m+max_level, m-max_level)
+            norm = utils.truncated_normal_old(m, s, to_replace.shape)
         print(norm.max(), norm.min())
         to_replace[:, :, :, :] = norm
         assert list(im.shape) == [1, 3, imsize, imsize], "Shape was:{}".format(im.shape)

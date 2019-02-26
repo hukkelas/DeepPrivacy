@@ -58,7 +58,7 @@ if __name__ == "__main__":
         m = (to_replace / im.max()).mean()
         s = (to_replace / im.max()).std()
 
-        norm = utils.truncated_normal(m, s, to_replace.shape, 1, 0)
+        norm = utils.truncated_normal(m, s, to_replace.shape)
         to_replace[:, :, :, :] = norm
         assert list(im.shape) == [1, 3, imsize, imsize], "Shape was:{}".format(im.shape)
 

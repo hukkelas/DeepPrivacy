@@ -117,6 +117,6 @@ def init_model(start_channel_size, num_levels, model):
         model.extend(transition_channels[i])
 
 
-def truncated_normal(mean, std, size, max_val, min_val):
+def truncated_normal(mean, std, size):
     normal = torch.zeros(size).normal_(mean=mean, std=std)
     return normal

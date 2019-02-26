@@ -72,9 +72,7 @@ def cut_bounding_box(condition, bounding_boxes):
             continue
         previous_image[:, :, :] = utils.truncated_normal(mean,
                                                          std,
-                                                         previous_image.shape,
-                                                         previous_image.max(),
-                                                         previous_image.min())
+                                                         previous_image.shape)
     return condition
 
 
@@ -142,7 +140,7 @@ class ConditionedCelebADataset:
                     0, landmarks.shape[1], 2)]  # Flip the x-values
         except Exception as e:
             print("Could not flip images.", e)
-        return images, condition, landmarks
+        return images.half(), condition.half(), landmarks.half()
 
     def validation_set_generator(self):
         validation_iters = self.validation_size // self.batch_size

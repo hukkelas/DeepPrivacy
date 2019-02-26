@@ -34,6 +34,7 @@ class WSConv2d(nn.Module):
 
         # new bias to use after wscale
         self.bias = self.conv.bias
+        self.bias = nn.Parameter(self.bias.view(1, self.bias.shape[0], 1, 1))
         self.conv.bias = None
         
         # calc wt scale
@@ -49,7 +50,7 @@ class WSConv2d(nn.Module):
         
     def forward(self, x):
         #return self.conv(x)
-        return self.conv(x) * self.wtScale + self.bias.view(1, self.bias.shape[0], 1, 1)
+        return self.conv(x) * self.wtScale + self.bias
 
     def __repr__(self):
         return self.__class__.__name__ + self.name

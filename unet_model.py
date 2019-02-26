@@ -41,14 +41,28 @@ class UnetUpsamplingBlock(nn.Module):
         return x
 
 
-def generate_pose_channel_images(min_imsize, max_imsize, device, pose_information):
+batch_indexes = {
+
+}
+pose_indexes = {
+
+}
+max_seen = 0
+
+
+def generate_pose_channel_images(min_imsize, max_imsize, device, pose_information, dtype):
+    global max_seen
     batch_size = pose_information.shape[0]
     num_poses = pose_information.shape[1] // 2
     pose_x = pose_information[:, range(0, pose_information.shape[1], 2)].view(-1)
     pose_y = pose_information[:, range(1, pose_information.shape[1], 2)].view(-1)
-    
-    batch_idx = torch.cat([torch.ones(num_poses)*k for k in range(batch_size)]).long()
-    pose_idx = torch.arange(0, num_poses).repeat(batch_size)
+    assert batch_size <= 256, "Overflow error for batch size > 256"
+    if max_imsize != max_seen:
+        max_seen = max_imsize
+        batch_indexes[max_imsize] = torch.cat([torch.ones(num_poses, dtype=torch.long)*k for k in range(batch_size)])
+        pose_indexes[max_imsize] = torch.arange(0, num_poses).repeat(batch_size)
+    batch_idx = batch_indexes[max_imsize]
+    pose_idx = pose_indexes[max_imsize]
     
     # All poses that are outside image, we move to the last pose channel
     illegal_mask = ((pose_x < 0) + (pose_x >= 1.0) + (pose_y < 0) + (pose_y >= 1.0)) != 0
@@ -58,11 +72,12 @@ def generate_pose_channel_images(min_imsize, max_imsize, device, pose_informatio
     pose_images = []
     imsize = min_imsize
     while imsize <= max_imsize:
-        new_im = torch.zeros((batch_size, num_poses+1, imsize, imsize))
+        new_im = torch.zeros((batch_size, num_poses+1, imsize, imsize), dtype=dtype, device=device)
+
         px = (pose_x * imsize).long()
         py = (pose_y * imsize).long()
         new_im[batch_idx, pose_idx, py, px] = 1
-        new_im = new_im[:, :-1].to(device) # Remove "throwaway" channel
+        new_im = new_im[:, :-1] # Remove "throwaway" channel
         pose_images.append(new_im)
         imsize *= 2
     return pose_images
@@ -165,7 +180,8 @@ class Generator(nn.Module):
         pose_channels = generate_pose_channel_images(4,
                                                      self.current_imsize, 
                                                      x_in.device,
-                                                     pose_info)
+                                                     pose_info,
+                                                     x_in.dtype)
         x = torch.cat((x, pose_channels[0]), dim=1)
 
         x = self.core_blocks_up[0](x)
@@ -246,7 +262,8 @@ class Discriminator(nn.Module):
         pose_channels = generate_pose_channel_images(4,
                                                      self.current_input_imsize,
                                                      x.device,
-                                                     pose_info)
+                                                     pose_info,
+                                                     x.dtype)
         x = torch.cat((x, condition), dim=1)
         x_old = self.from_rgb_old(x)
         x_new = self.from_rgb_new(x)

@@ -173,8 +173,7 @@ if __name__ == "__main__":
             s = to_replace.std()
             to_replace[:, :, :, :] = utils.truncated_normal(m,
                                                             s,
-                                                            to_replace.shape,
-                                                            1, 0)
+                                                            to_replace.shape)
             final_keypoint = None
             for j, keypoint in enumerate(keypoints):
                 if is_keypoint_within_bbox(x0_, y0_, width_, height_, keypoint):
