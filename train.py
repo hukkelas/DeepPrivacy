@@ -6,15 +6,17 @@ import utils
 from utils import load_checkpoint, save_checkpoint, to_cuda
 from unet_model import Generator, Discriminator
 import os
-from dataloaders import load_celeba_condition, load_ffhq_condition
+from dataloaders_v2 import load_celeba_condition, load_ffhq_condition
 from options import load_options, print_options
 import time
 import numpy as np
 from metrics import fid
-#from apex.fp16_utils import FP16_Optimizer
-#from apex.optimizers import FusedAdam
+from apex.optimizers import FusedAdam
+from apex import amp
+amp_handle = amp.init(enabled=True)
 torch.backends.cudnn.benchmark = True
-assert torch.backends.cudnn.enabled
+DATA_MEAN = [0.5, 0.5, 0.5]
+DATA_STD = [0.5, 0.5, 0.5]
 
 
 def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
@@ -84,7 +86,11 @@ def save_images(writer, images, global_step, directory):
 
 
 def normalize_img(image):
-    image = (image + 1) / 2
+    mean = torch.tensor(DATA_MEAN).view(1, 3, 1, 1)
+    mean = mean.to(image.device).to(image.dtype)
+    std = torch.tensor(DATA_STD).view(1,3,1,1)
+    std = std.to(image.device).to(image.dtype)
+    image = image.mul_(std).add_(std)
     image = utils.clip(image, 0, 1)
     return image
 
@@ -96,14 +102,52 @@ def load_dataset(dataset, batch_size, imsize):
         return load_ffhq_condition(batch_size, imsize)
 
 
-pool = torch.nn.AvgPool2d(2, 2)
+class DataPrefetcher():
+
+    def __init__(self, loader, transition_variable):
+        self.pool = torch.nn.AvgPool2d(2, 2)
+        self.loader = iter(loader)
+        self.stream = torch.cuda.Stream()
+        self.mean = torch.tensor(DATA_MEAN).cuda().view(1,3,1,1)
+        self.std = torch.tensor(DATA_STD).cuda().view(1,3,1,1)
+        self.preload(transition_variable)
+
+    def preload(self, transition_variable):
+        try:
+            self.next_image, self.next_condition, self.next_landmark = next(self.loader)
+        except StopIteration:
+            self.next_image = None
+            self.next_condition = None
+            self.next_landmark = None
+            return
+        with torch.cuda.stream(self.stream):
+            self.next_image = self.next_image.cuda(non_blocking=True).float()
+            self.next_condition = self.next_condition.cuda(non_blocking=True).float()
+            self.next_landmark = self.next_landmark.cuda(non_blocking=True)
+            
+            self.next_image = self.next_image / 255
+            self.next_image.sub_(self.mean).div_(self.std)
+
+            self.next_condition = self.next_condition / 255
+            self.next_condition.sub_(self.mean).div_(self.std)
+
+            self.next_image = interpolate_image(self.pool,
+                                                self.next_image,
+                                                transition_variable)
+            self.next_condition = interpolate_image(self.pool,
+                                                    self.next_condition,
+                                                    transition_variable)
+    
+    def next(self, transition_variable):
+        torch.cuda.current_stream().wait_stream(self.stream)
+        next_image = self.next_image
+        next_condition = self.next_condition
+        next_landmark = self.next_landmark
+        self.preload(transition_variable)
+        return next_image, next_condition, next_landmark
 
 
-def preprocess_images(images, transition_variable):
-    images = Variable(images)
-    images = to_cuda(images)
-    images = adjust_dynamic_range(images)
-    # Compute averaged image
+def interpolate_image(pool, images, transition_variable):
     y = pool(images)
     y = torch.nn.functional.interpolate(y, scale_factor=2)
 
@@ -163,12 +207,9 @@ class Trainer:
                                                             self.image_channels)
             self.init_running_average_generator()
             self.extend_models()
-
             self.init_optimizers()
-        self.data_loader = load_dataset(self.dataset,
-                                        self.batch_size,
-                                        self.current_imsize)
-
+        self.dataloader_train, self.dataloader_val = load_dataset(
+            self.dataset, self.batch_size, self.current_imsize)
 
         self.log_variable("stats/batch_size", self.batch_size)
         self.discriminator.update_transition_value(self.transition_variable)
@@ -312,14 +353,16 @@ class Trainer:
                 (1-self.running_average_generator_decay) * current_parameter
 
     def init_optimizers(self):
-        self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(),
+        self.d_optimizer = FusedAdam(self.discriminator.parameters(),
                                             lr=self.learning_rate,
                                             betas=(0.0, 0.99))
+        self.d_optimizer = amp_handle.wrap_optimizer(self.d_optimizer)
         #self.d_optimizer = FP16_Optimizer(self.d_optimizer, dynamic_loss_scale=True)
-        self.g_optimizer = torch.optim.Adam(self.generator.parameters(),
+        self.g_optimizer = FusedAdam(self.generator.parameters(),
                                             lr=self.learning_rate,
                                             betas=(0.0, 0.99))
         #self.g_optimizer = FP16_Optimizer(self.g_optimizer, dynamic_loss_scale=True)
+        self.g_optimizer = amp_handle.wrap_optimizer(self.g_optimizer)
 
     def log_variable(self, name, value, log_to_validation=False):
         if log_to_validation:
@@ -334,21 +377,18 @@ class Trainer:
         wasserstein_distances = []
         epsilon_penalties = []
         self.running_average_generator.eval()
-
-        real_images = torch.zeros((self.data_loader.validation_size,
+        self.discriminator.eval()
+        real_images = torch.zeros((len(self.dataloader_val)*self.batch_size,
                                    3,
                                    self.current_imsize,
                                    self.current_imsize))
-        fake_images = torch.zeros((self.data_loader.validation_size,
+        fake_images = torch.zeros((len(self.dataloader_val)*self.batch_size,
                                    3,
                                    self.current_imsize,
                                    self.current_imsize))
-
-        for idx, (images, condition, landmarks) in enumerate(
-                self.data_loader.validation_set_generator()):
-            real_data = preprocess_images(images, self.transition_variable)
-            condition = preprocess_images(condition, self.transition_variable)
-            landmarks = to_cuda(landmarks)
+        data_prefetcher = DataPrefetcher(self.dataloader_val, self.transition_variable)
+        for idx in range(len(self.dataloader_val)):
+            real_data, condition, landmarks = data_prefetcher.next(self.transition_variable)
             fake_data = self.running_average_generator(condition,
                                                        landmarks)
             real_score = self.discriminator(real_data, condition, landmarks)
@@ -361,7 +401,7 @@ class Trainer:
             wasserstein_distances.append(wasserstein_distance.mean().item())
             epsilon_penalties.append(epsilon_penalty.mean().item())
 
-            fake_data = normalize_img(fake_data)
+            fake_data = normalize_img(fake_data.detach())
             real_data = normalize_img(real_data)
 
             start_idx = idx*self.batch_size
@@ -383,14 +423,14 @@ class Trainer:
                           np.mean(epsilon_penalties), True)
         directory = os.path.join(self.generated_data_dir, "validation")
         os.makedirs(directory, exist_ok=True)
-        save_images(self.validation_writer, fake_images[:50], self.global_step,
+        save_images(self.validation_writer, fake_images[:64], self.global_step,
                     directory)
+        self.discriminator.train()
 
     def train(self):
         for epoch in range(self.start_epoch, self.num_epochs):
-
-            for i, (real_data, condition, landmarks) in enumerate(
-                    self.data_loader):
+            prefetcher = DataPrefetcher(self.dataloader_train, self.transition_variable)
+            for i in range(len(self.dataloader_train)):
                 batch_start_time = time.time()
                 self.generator.train()
                 if self.is_transitioning:
@@ -402,12 +442,7 @@ class Trainer:
                         self.transition_variable)
                     self.running_average_generator.update_transition_value(
                         self.transition_variable)
-
-                real_data = preprocess_images(
-                    real_data, self.transition_variable)
-                condition = preprocess_images(
-                    condition, self.transition_variable)
-                landmarks = to_cuda(landmarks)
+                real_data, condition, landmarks = prefetcher.next(self.transition_variable)
 
                 # Forward G
                 fake_data = self.generator(condition, landmarks)
@@ -431,10 +466,13 @@ class Trainer:
 
                 D_loss = D_loss.mean()
                 self.d_optimizer.zero_grad()
-                D_loss.backward()
+                #self.d_optimizer.backward(D_loss)
+                with self.d_optimizer.scale_loss(D_loss) as scaled_loss:
+                    scaled_loss.backward()
                 self.d_optimizer.step()
 
                 # Forward G
+                # TODO: REMOVE!
                 fake_scores = self.discriminator(
                     fake_data, condition, landmarks)
 
@@ -442,7 +480,9 @@ class Trainer:
 
                 self.d_optimizer.zero_grad()
                 self.g_optimizer.zero_grad()
-                G_loss.backward()
+                #self.g_optimizer.backward(G_loss)
+                with self.g_optimizer.scale_loss(G_loss) as scaled_loss:
+                    scaled_loss.backward()
                 self.g_optimizer.step()
 
                 nsec_per_img = (
@@ -506,8 +546,8 @@ class Trainer:
                         self.save_checkpoint(epoch)
                     elif self.current_imsize < self.max_imsize:
                         self.extend_models()
-                        del self.data_loader
-                        self.data_loader = load_dataset(
+                        del self.dataloader_train, self.dataloader_val
+                        self.dataloader_train, self.dataloader_val = load_dataset(
                             self.dataset, self.batch_size, self.current_imsize)
                         self.is_transitioning = True
 
@@ -517,16 +557,16 @@ class Trainer:
                             self.transition_variable)
                         self.generator.update_transition_value(
                             self.transition_variable)
-                        _, condition, landmark = next(iter(self.data_loader))
-                        landmark = to_cuda(landmark)
-                        condition = preprocess_images(
-                            condition, self.transition_variable)
-                        fake_data_sample = normalize_img(
-                            self.generator(condition, landmark).data)
-                        os.makedirs("lol", exist_ok=True)
-                        filepath = os.path.join("lol", "test.jpg")
-                        torchvision.utils.save_image(
-                            fake_data_sample[:100], filepath, nrow=10)
+                        #_, condition, landmark = next(iter(self.data_loader))
+                        #landmark = to_cuda(landmark)
+                        #condition = preprocess_images(
+                        #    condition, self.transition_variable)
+                        #fake_data_sample = normalize_img(
+                        #    self.generator(condition, landmark).data)
+                        #os.makedirs("lol", exist_ok=True)
+                        #filepath = os.path.join("lol", "test.jpg")
+                        #torchvision.utils.save_image(
+                        #    fake_data_sample[:100], filepath, nrow=10)
                         # self.log_model_graphs()
                         self.save_checkpoint(epoch)
 
