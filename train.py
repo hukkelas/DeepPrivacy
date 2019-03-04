@@ -7,13 +7,12 @@ from utils import load_checkpoint, save_checkpoint, to_cuda
 from unet_model import Generator, Discriminator
 import os
 from dataloaders_v2 import load_celeba_condition, load_ffhq_condition
-from options import load_options, print_options
+from options import load_options, print_options, DEFAULT_IMSIZE
 import time
 import numpy as np
 from metrics import fid
-from apex.optimizers import FusedAdam
-from apex import amp
-amp_handle = amp.init(enabled=True)
+from apex.optimizers import FusedAdam, FP16_Optimizer
+from apex.fp16_utils import convert_network
 torch.backends.cudnn.benchmark = True
 DATA_MEAN = [0.5, 0.5, 0.5]
 DATA_STD = [0.5, 0.5, 0.5]
@@ -23,7 +22,8 @@ def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() - 1)
     epsilon = torch.rand(epsilon_shape)
     epsilon = to_cuda(epsilon)
-
+    epsilon = epsilon.to(fake_data.dtype)
+    real_data = real_data.to(fake_data.dtype)
     x_hat = epsilon * real_data + (1-epsilon) * fake_data.detach()
     x_hat = to_cuda(Variable(x_hat, requires_grad=True))
 
@@ -31,11 +31,37 @@ def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
     grad = torch.autograd.grad(
         outputs=logits,
         inputs=x_hat,
-        grad_outputs=to_cuda(torch.ones(logits.shape)),
+        grad_outputs=to_cuda(torch.ones(logits.shape)).to(fake_data.dtype),
         create_graph=True
     )[0].view(x_hat.shape[0], -1)
     grad_penalty = ((grad.norm(p=2, dim=1) - 1)**2)
-    return grad_penalty
+    return grad_penalty.to(fake_data.dtype)
+
+
+class FP16Model(torch.nn.Module):
+
+    def __init__(self, network):
+        super().__init__()
+        self.network = network
+        self.fp16_enabled = False
+        # self.network = convert_network(network, dtype=torch.half)
+
+    def forward(self, *inputs):
+        if self.fp16_enabled:
+            inputs = tuple(t.half() for t in inputs)
+        return self.network(*inputs)
+
+    def extend(self, channel_size):
+        self.network.extend(channel_size)
+        if self.network.current_imsize > 16:
+            self.fp16_enabled = True
+            self.network = convert_network(self.network, dtype=torch.half)
+
+    def update_transition_value(self, value):
+        self.network.transition_value = value
+
+    def new_parameters(self):
+        return self.network.new_parameters()
 
 
 class DataParallellWrapper(torch.nn.Module):
@@ -57,6 +83,9 @@ class DataParallellWrapper(torch.nn.Module):
 
     def update_transition_value(self, value):
         self.model.transition_value = value
+    
+    def new_parameters(self):
+        return self.model.new_parameters()
 
 
 def init_model(imsize, pose_size, start_channel_dim, image_channels):
@@ -64,10 +93,10 @@ def init_model(imsize, pose_size, start_channel_dim, image_channels):
                                   imsize,
                                   int(start_channel_dim*2**0.5),
                                   pose_size)
-    discriminator = DataParallellWrapper(discriminator)
     generator = Generator(pose_size, start_channel_dim, image_channels)
-    generator = DataParallellWrapper(generator)
     to_cuda([discriminator, generator])
+    discriminator = FP16Model(discriminator)
+    generator = FP16Model(generator)
 
     return discriminator, generator
 
@@ -295,10 +324,11 @@ class Trainer:
                 self.pose_size, current_channels,
                 self.image_channels)
             self.init_running_average_generator()
-            for i in range(self.transition_step):
-                self.discriminator.extend(
-                    int(self.transition_channels[i]*2**0.5))
-                self.generator.extend(self.transition_channels[i])
+            num_transitions = self.transition_step
+            self.transition_step = 0
+            self.current_imsize = DEFAULT_IMSIZE
+            for i in range(num_transitions):
+                self.extend_models()
 
             self.discriminator.load_state_dict(ckpt['D'])
             self.generator.load_state_dict(ckpt['G'])
@@ -324,14 +354,15 @@ class Trainer:
             self.running_average_generator)
         self.running_average_generator = to_cuda(
             self.running_average_generator)
-        for i in range(self.transition_step):
-            self.extend_running_average_generator(self.transition_channels[i])
-        #self.running_average_generator = self.running_average_generator.float()
+        self.running_average_generator = self.running_average_generator.float()
 
     def extend_running_average_generator(self, current_channels):
         g = self.running_average_generator
         g.extend(current_channels)
-        #g = self.running_average_generator.float()
+        for avg_param, cur_param in zip(g.new_parameters(), self.generator.new_parameters()):
+            assert avg_param.data.shape == cur_param.data.shape
+            avg_param.data = cur_param.data
+        self.running_average_generator = g.float()
 
     def extend_models(self):
         current_channels = self.transition_channels[self.transition_step]
@@ -350,19 +381,19 @@ class Trainer:
                 self.running_average_generator.parameters(),
                 self.generator.parameters()):
             avg_parameter.data = self.running_average_generator_decay*avg_parameter + \
-                (1-self.running_average_generator_decay) * current_parameter
+                ((1-self.running_average_generator_decay) * current_parameter.float())
 
     def init_optimizers(self):
         self.d_optimizer = FusedAdam(self.discriminator.parameters(),
-                                            lr=self.learning_rate,
-                                            betas=(0.0, 0.99))
-        self.d_optimizer = amp_handle.wrap_optimizer(self.d_optimizer)
-        #self.d_optimizer = FP16_Optimizer(self.d_optimizer, dynamic_loss_scale=True)
+                                     lr=self.learning_rate,
+                                     betas=(0.0, 0.99))
+        #self.d_optimizer = amp_handle.wrap_optimizer(self.d_optimizer)
+        self.d_optimizer = FP16_Optimizer(self.d_optimizer, dynamic_loss_scale=True)
         self.g_optimizer = FusedAdam(self.generator.parameters(),
-                                            lr=self.learning_rate,
-                                            betas=(0.0, 0.99))
-        #self.g_optimizer = FP16_Optimizer(self.g_optimizer, dynamic_loss_scale=True)
-        self.g_optimizer = amp_handle.wrap_optimizer(self.g_optimizer)
+                                     lr=self.learning_rate,
+                                     betas=(0.0, 0.99))
+        self.g_optimizer = FP16_Optimizer(self.g_optimizer, dynamic_loss_scale=True)
+        #self.g_optimizer = amp_handle.wrap_optimizer(self.g_optimizer)
 
     def log_variable(self, name, value, log_to_validation=False):
         if log_to_validation:
@@ -466,9 +497,10 @@ class Trainer:
 
                 D_loss = D_loss.mean()
                 self.d_optimizer.zero_grad()
-                #self.d_optimizer.backward(D_loss)
-                with self.d_optimizer.scale_loss(D_loss) as scaled_loss:
-                    scaled_loss.backward()
+                self.d_optimizer.backward(D_loss)
+               # D_loss.backward()
+                #with self.d_optimizer.scale_loss(D_loss) as scaled_loss:
+                #    scaled_loss.backward()
                 self.d_optimizer.step()
 
                 # Forward G
@@ -480,9 +512,10 @@ class Trainer:
 
                 self.d_optimizer.zero_grad()
                 self.g_optimizer.zero_grad()
-                #self.g_optimizer.backward(G_loss)
-                with self.g_optimizer.scale_loss(G_loss) as scaled_loss:
-                    scaled_loss.backward()
+                self.g_optimizer.backward(G_loss)
+                #G_loss.backward()
+                #with self.g_optimizer.scale_loss(G_loss) as scaled_loss:
+                #    scaled_loss.backward()
                 self.g_optimizer.step()
 
                 nsec_per_img = (

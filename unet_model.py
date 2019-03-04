@@ -57,12 +57,13 @@ def generate_pose_channel_images(min_imsize, max_imsize, device, pose_informatio
     pose_x = pose_information[:, range(0, pose_information.shape[1], 2)].view(-1)
     pose_y = pose_information[:, range(1, pose_information.shape[1], 2)].view(-1)
     assert batch_size <= 256, "Overflow error for batch size > 256"
-    if max_imsize != max_seen:
+    if (max_imsize, batch_size) not in batch_indexes.keys():
         max_seen = max_imsize
-        batch_indexes[max_imsize] = torch.cat([torch.ones(num_poses, dtype=torch.long)*k for k in range(batch_size)])
-        pose_indexes[max_imsize] = torch.arange(0, num_poses).repeat(batch_size)
-    batch_idx = batch_indexes[max_imsize]
-    pose_idx = pose_indexes[max_imsize]
+        batch_indexes[(max_imsize, batch_size)] = torch.cat([torch.ones(num_poses, dtype=torch.long)*k for k in range(batch_size)])
+        pose_indexes[(max_imsize, batch_size)] = torch.arange(0, num_poses).repeat(batch_size)
+    batch_idx = batch_indexes[(max_imsize, batch_size)]
+    pose_idx = pose_indexes[(max_imsize, batch_size)]
+
     
     # All poses that are outside image, we move to the last pose channel
     illegal_mask = ((pose_x < 0) + (pose_x >= 1.0) + (pose_y < 0) + (pose_y >= 1.0)) != 0
@@ -160,6 +161,9 @@ class Generator(nn.Module):
         ))
         self.prev_channel_size = output_dim
 
+    def new_parameters(self):
+        return list(self.new_down.parameters()) + list(self.to_rgb_new.parameters())
+
     def forward(self, x_in, pose_info):
         unet_skips = []
         if self.current_imsize != 4:
@@ -221,7 +225,7 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.num_poses = pose_size // 2
         self.image_channels = in_channels
-        self.current_input_imsize = 4
+        self.current_imsize = 4
         self.from_rgb_new = conv_module_bn(in_channels*2, start_channel_dim, 1, 0)
 
         self.from_rgb_old = conv_module_bn(in_channels*2, start_channel_dim, 1, 0)
@@ -237,9 +241,9 @@ class Discriminator(nn.Module):
         self.prev_channel_dim = start_channel_dim
 
     def extend(self, input_dim):
-        self.current_input_imsize *= 2
+        self.current_imsize *= 2
         output_dim = self.prev_channel_dim
-        if not self.current_input_imsize == 8:
+        if not self.current_imsize == 8:
             self.core_model = nn.Sequential(
                 self.new_block,
                 *self.core_model.children()
@@ -260,18 +264,18 @@ class Discriminator(nn.Module):
 
     def forward(self, x, condition, pose_info):
         pose_channels = generate_pose_channel_images(4,
-                                                     self.current_input_imsize,
+                                                     self.current_imsize,
                                                      x.device,
                                                      pose_info,
                                                      x.dtype)
         x = torch.cat((x, condition), dim=1)
         x_old = self.from_rgb_old(x)
         x_new = self.from_rgb_new(x)
-        if self.current_input_imsize != 4:
+        if self.current_imsize != 4:
             x_new = torch.cat((x_new, pose_channels[-1]), dim=1)
         x_new = self.new_block(x_new)
         x = get_transition_value(x_old, x_new, self.transition_value)
-        idx = 1 if self.current_input_imsize == 4 else 2
+        idx = 1 if self.current_imsize == 4 else 2
         for block in self.core_model.children():
             x = torch.cat((x, pose_channels[-idx]), dim=1)
             idx += 1
