@@ -13,6 +13,7 @@ import numpy as np
 from metrics import fid
 from apex.optimizers import FusedAdam, FP16_Optimizer
 from apex.fp16_utils import convert_network
+from apex import amp
 torch.backends.cudnn.benchmark = True
 DATA_MEAN = [0.5, 0.5, 0.5]
 DATA_STD = [0.5, 0.5, 0.5]
@@ -26,7 +27,6 @@ def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
     real_data = real_data.to(fake_data.dtype)
     x_hat = epsilon * real_data + (1-epsilon) * fake_data.detach()
     x_hat = to_cuda(Variable(x_hat, requires_grad=True))
-
     logits = discriminator(x_hat, condition, landmarks)
     grad = torch.autograd.grad(
         outputs=logits,
@@ -43,19 +43,19 @@ class FP16Model(torch.nn.Module):
     def __init__(self, network):
         super().__init__()
         self.network = network
-        self.fp16_enabled = False
+        #self.fp16_enabled = False
         # self.network = convert_network(network, dtype=torch.half)
 
     def forward(self, *inputs):
-        if self.fp16_enabled:
-            inputs = tuple(t.half() for t in inputs)
+        #if self.fp16_enabled:
+        #    inputs = tuple(t.half() for t in inputs)
         return self.network(*inputs)
 
     def extend(self, channel_size):
         self.network.extend(channel_size)
-        if self.network.current_imsize > 16:
-            self.fp16_enabled = True
-            self.network = convert_network(self.network, dtype=torch.half)
+        # if self.network.current_imsize > 16:
+        #    self.fp16_enabled = True
+        #    self.network = convert_network(self.network, dtype=torch.half)
 
     def update_transition_value(self, value):
         self.network.transition_value = value
@@ -384,15 +384,27 @@ class Trainer:
                 ((1-self.running_average_generator_decay) * current_parameter.float())
 
     def init_optimizers(self):
-        self.d_optimizer = FusedAdam(self.discriminator.parameters(),
+        self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(),
                                      lr=self.learning_rate,
                                      betas=(0.0, 0.99))
         #self.d_optimizer = amp_handle.wrap_optimizer(self.d_optimizer)
-        self.d_optimizer = FP16_Optimizer(self.d_optimizer, dynamic_loss_scale=True)
-        self.g_optimizer = FusedAdam(self.generator.parameters(),
+        #self.d_optimizer = FP16_Optimizer(self.d_optimizer, dynamic_loss_scale=True)
+        self.g_optimizer = torch.optim.Adam(self.generator.parameters(),
                                      lr=self.learning_rate,
                                      betas=(0.0, 0.99))
-        self.g_optimizer = FP16_Optimizer(self.g_optimizer, dynamic_loss_scale=True)
+        #self.g_optimizer = FP16_Optimizer(self.g_optimizer, dynamic_loss_scale=True)
+        self.generator, self.g_optimizer = amp.initialize(self.generator,
+                                                         self.g_optimizer,
+                                                         keep_batchnorm_fp32=False,
+                                                         opt_level='O1',
+                                                         loss_scale="dynamic"
+                                                         )
+        self.discriminator, self.d_optimizer = amp.initialize(self.discriminator,
+                                                             self.d_optimizer,
+                                                             keep_batchnorm_fp32=False,
+                                                             opt_level='O1',
+                                                             loss_scale="dynamic"
+                                                             )                                                         
         #self.g_optimizer = amp_handle.wrap_optimizer(self.g_optimizer)
 
     def log_variable(self, name, value, log_to_validation=False):
@@ -497,25 +509,25 @@ class Trainer:
 
                 D_loss = D_loss.mean()
                 self.d_optimizer.zero_grad()
-                self.d_optimizer.backward(D_loss)
+                #self.d_optimizer.backward(D_loss)
                # D_loss.backward()
-                #with self.d_optimizer.scale_loss(D_loss) as scaled_loss:
-                #    scaled_loss.backward()
+                with amp.scale_loss(D_loss, self.d_optimizer) as scaled_loss:
+                    scaled_loss.backward()
                 self.d_optimizer.step()
 
                 # Forward G
                 # TODO: REMOVE!
+                #fake_data.requires_grad = True
                 fake_scores = self.discriminator(
                     fake_data, condition, landmarks)
-
                 G_loss = (-fake_scores).mean()
 
                 self.d_optimizer.zero_grad()
                 self.g_optimizer.zero_grad()
-                self.g_optimizer.backward(G_loss)
+                #self.g_optimizer.backward(G_loss)
                 #G_loss.backward()
-                #with self.g_optimizer.scale_loss(G_loss) as scaled_loss:
-                #    scaled_loss.backward()
+                with amp.scale_loss(G_loss, self.g_optimizer) as scaled_loss:
+                    scaled_loss.backward()
                 self.g_optimizer.step()
 
                 nsec_per_img = (
