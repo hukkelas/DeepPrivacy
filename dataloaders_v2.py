@@ -118,10 +118,15 @@ def load_celeba_condition(batch_size, imsize=128):
     return load_dataset(dirpath, imsize, batch_size)
 
 
+def load_yfcc100m(batch_size, imsize=128):
+    dirpath = os.path.join("data", "yfcc100m_torch")
+    return load_dataset(dirpath, imsize, batch_size)
+
+
 def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
     # Data augment width and height by percentage of width.
     # Bounding box will preserve its center.
-    shrink_percentage = np.random.uniform()
+    shrink_percentage = np.random.uniform(-percentage, percentage)
     width = (bounding_boxes[2] - bounding_boxes[0]).float()
     height = (bounding_boxes[3] - bounding_boxes[1]).float()
 
@@ -149,6 +154,6 @@ def cut_bounding_box(condition, bounding_boxes):
     mean = previous_image.mean()
     std = previous_image.std()
     replacement = np.random.normal(mean, std,
-                                   size=previous_image.shape)*255
+                                   size=previous_image.shape)
     previous_image[:, :, :] = replacement.astype(np.uint8)
     return condition

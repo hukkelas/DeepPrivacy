@@ -6,7 +6,7 @@ import utils
 from utils import load_checkpoint, save_checkpoint, to_cuda
 from unet_model import Generator, Discriminator
 import os
-from dataloaders_v2 import load_celeba_condition, load_ffhq_condition
+from dataloaders_v2 import load_celeba_condition, load_ffhq_condition, load_yfcc100m
 from options import load_options, print_options, DEFAULT_IMSIZE
 import time
 import numpy as np
@@ -15,8 +15,6 @@ from apex.optimizers import FusedAdam, FP16_Optimizer
 from apex.fp16_utils import convert_network
 from apex import amp
 torch.backends.cudnn.benchmark = True
-DATA_MEAN = [0.5, 0.5, 0.5]
-DATA_STD = [0.5, 0.5, 0.5]
 
 
 def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
@@ -115,11 +113,7 @@ def save_images(writer, images, global_step, directory):
 
 
 def normalize_img(image):
-    mean = torch.tensor(DATA_MEAN).view(1, 3, 1, 1)
-    mean = mean.to(image.device).to(image.dtype)
-    std = torch.tensor(DATA_STD).view(1,3,1,1)
-    std = std.to(image.device).to(image.dtype)
-    image = image.mul_(std).add_(std)
+    image = (image+1)/2
     image = utils.clip(image, 0, 1)
     return image
 
@@ -129,6 +123,8 @@ def load_dataset(dataset, batch_size, imsize):
         return load_celeba_condition(batch_size, imsize)
     if dataset == "ffhq":
         return load_ffhq_condition(batch_size, imsize)
+    if dataset == "yfcc100m":
+        return load_yfcc100m(batch_size, imsize)
 
 
 class DataPrefetcher():
@@ -137,8 +133,6 @@ class DataPrefetcher():
         self.pool = torch.nn.AvgPool2d(2, 2)
         self.loader = iter(loader)
         self.stream = torch.cuda.Stream()
-        self.mean = torch.tensor(DATA_MEAN).cuda().view(1,3,1,1)
-        self.std = torch.tensor(DATA_STD).cuda().view(1,3,1,1)
         self.preload(transition_variable)
 
     def preload(self, transition_variable):
@@ -155,10 +149,10 @@ class DataPrefetcher():
             self.next_landmark = self.next_landmark.cuda(non_blocking=True)
             
             self.next_image = self.next_image / 255
-            self.next_image.sub_(self.mean).div_(self.std)
+            self.next_image = self.next_image*2 - 1
 
             self.next_condition = self.next_condition / 255
-            self.next_condition.sub_(self.mean).div_(self.std)
+            self.next_condition = self.next_condition*2 - 1
 
             self.next_image = interpolate_image(self.pool,
                                                 self.next_image,
@@ -384,12 +378,12 @@ class Trainer:
                 ((1-self.running_average_generator_decay) * current_parameter.float())
 
     def init_optimizers(self):
-        self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(),
+        self.d_optimizer = FusedAdam(self.discriminator.parameters(),
                                      lr=self.learning_rate,
                                      betas=(0.0, 0.99))
         #self.d_optimizer = amp_handle.wrap_optimizer(self.d_optimizer)
         #self.d_optimizer = FP16_Optimizer(self.d_optimizer, dynamic_loss_scale=True)
-        self.g_optimizer = torch.optim.Adam(self.generator.parameters(),
+        self.g_optimizer = FusedAdam(self.generator.parameters(),
                                      lr=self.learning_rate,
                                      betas=(0.0, 0.99))
         #self.g_optimizer = FP16_Optimizer(self.g_optimizer, dynamic_loss_scale=True)
@@ -429,7 +423,8 @@ class Trainer:
                                    3,
                                    self.current_imsize,
                                    self.current_imsize))
-        data_prefetcher = DataPrefetcher(self.dataloader_val, self.transition_variable)
+        data_prefetcher = DataPrefetcher(self.dataloader_val,
+                                         self.transition_variable)
         for idx in range(len(self.dataloader_val)):
             real_data, condition, landmarks = data_prefetcher.next(self.transition_variable)
             fake_data = self.running_average_generator(condition,
@@ -486,7 +481,7 @@ class Trainer:
                     self.running_average_generator.update_transition_value(
                         self.transition_variable)
                 real_data, condition, landmarks = prefetcher.next(self.transition_variable)
-
+                torchvision.utils.save_image(normalize_img(real_data), "test.jpg", nrow=10)
                 # Forward G
                 fake_data = self.generator(condition, landmarks)
                 # Train Discriminator
@@ -590,6 +585,21 @@ class Trainer:
                             self.transition_variable)
                         self.save_checkpoint(epoch)
                     elif self.current_imsize < self.max_imsize:
+                        prefetcher = DataPrefetcher(self.dataloader_train, self.transition_variable)
+                        real_image, condition, landmark = prefetcher.next(self.transition_variable)
+
+                        fake_data = self.generator(condition, landmark)
+                        fake_data = normalize_img(fake_data.detach())[:8]
+                        real_data = normalize_img(real_image)[:8]
+                        condition = normalize_img(condition)[:8]
+                        to_save = torch.cat((real_data, condition, fake_data))
+                        os.makedirs("lol", exist_ok=True)
+                        filepath = os.path.join("lol",
+                                                "transition_before{}.jpg".format(self.current_imsize))
+                        torchvision.utils.save_image(
+                            fake_data[:64], filepath, nrow=8
+                        )
+
                         self.extend_models()
                         del self.dataloader_train, self.dataloader_val
                         self.dataloader_train, self.dataloader_val = load_dataset(
@@ -602,17 +612,20 @@ class Trainer:
                             self.transition_variable)
                         self.generator.update_transition_value(
                             self.transition_variable)
-                        #_, condition, landmark = next(iter(self.data_loader))
-                        #landmark = to_cuda(landmark)
-                        #condition = preprocess_images(
-                        #    condition, self.transition_variable)
-                        #fake_data_sample = normalize_img(
-                        #    self.generator(condition, landmark).data)
-                        #os.makedirs("lol", exist_ok=True)
-                        #filepath = os.path.join("lol", "test.jpg")
-                        #torchvision.utils.save_image(
-                        #    fake_data_sample[:100], filepath, nrow=10)
-                        # self.log_model_graphs()
+                        prefetcher = DataPrefetcher(self.dataloader_val, self.transition_variable)
+                        real_image, condition, landmark = prefetcher.next(self.transition_variable)
+
+                        fake_data = self.generator(condition, landmark)
+                        fake_data = normalize_img(fake_data.detach())[:8]
+                        real_data = normalize_img(real_image)[:8]
+                        condition = normalize_img(condition)[:8]
+                        to_save = torch.cat((real_data, condition, fake_data))
+                        os.makedirs("lol", exist_ok=True)
+                        filepath = os.path.join("lol",
+                                                "transition_after{}.jpg".format(self.current_imsize//2))
+                        torchvision.utils.save_image(
+                            fake_data[:64], filepath, nrow=8
+                        )
                         self.save_checkpoint(epoch)
 
                         break
