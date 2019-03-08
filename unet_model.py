@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn as nn
 from utils import to_cuda
@@ -47,19 +46,16 @@ batch_indexes = {
 pose_indexes = {
 
 }
-max_seen = 0
-
 
 def generate_pose_channel_images(min_imsize, max_imsize, device, pose_information, dtype):
-    global max_seen
     batch_size = pose_information.shape[0]
     num_poses = pose_information.shape[1] // 2
     pose_x = pose_information[:, range(0, pose_information.shape[1], 2)].view(-1)
     pose_y = pose_information[:, range(1, pose_information.shape[1], 2)].view(-1)
     assert batch_size <= 256, "Overflow error for batch size > 256"
     if (max_imsize, batch_size) not in batch_indexes.keys():
-        max_seen = max_imsize
-        batch_indexes[(max_imsize, batch_size)] = torch.cat([torch.ones(num_poses, dtype=torch.long)*k for k in range(batch_size)])
+        batch_indexes[(max_imsize, batch_size)] = torch.cat(
+            [torch.ones(num_poses, dtype=torch.long)*k for k in range(batch_size)])
         pose_indexes[(max_imsize, batch_size)] = torch.arange(0, num_poses).repeat(batch_size)
     batch_idx = batch_indexes[(max_imsize, batch_size)]
     pose_idx = pose_indexes[(max_imsize, batch_size)]
@@ -222,6 +218,7 @@ class Discriminator(nn.Module):
                  start_channel_dim,
                  pose_size
                  ):
+        start_channel_dim = int(start_channel_dim*(2**0.5))
         super(Discriminator, self).__init__()
         self.num_poses = pose_size // 2
         self.image_channels = in_channels
@@ -241,6 +238,7 @@ class Discriminator(nn.Module):
         self.prev_channel_dim = start_channel_dim
 
     def extend(self, input_dim):
+        input_dim = int(input_dim * (2**0.5))
         self.current_imsize *= 2
         output_dim = self.prev_channel_dim
         if not self.current_imsize == 8:

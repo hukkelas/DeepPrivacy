@@ -1,7 +1,7 @@
 import torch 
 from utils import load_checkpoint, to_cuda
 from scripts.utils import init_generator, image_to_numpy, get_model_name
-from train import normalize_img, preprocess_images
+from train import denormalize_img, preprocess_images
 from metrics import ssim, mssim
 from dataloaders import load_celeba_condition
 import matplotlib.pyplot as plt
@@ -31,8 +31,8 @@ if __name__ == "__main__":
         g.train()
         d = g(z, None)
         g.eval()
-        d = normalize_img(d)
-        conditions = normalize_img(z)
+        d = denormalize_img(d)
+        conditions = denormalize_img(z)
         orig = to_cuda(orig)
         mssim_all.append(mssim.msssim(orig, d).data.cpu().item())
         ssim_all.append(ssim.ssim(orig, d).data.cpu().item())

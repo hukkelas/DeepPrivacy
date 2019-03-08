@@ -1,19 +1,18 @@
+import time
+import os
+import numpy as np
 import tensorboardX
 import torch
-from torch.autograd import Variable
+from apex.optimizers import FusedAdam
+from apex import amp
 import torchvision
 import utils
 from utils import load_checkpoint, save_checkpoint, to_cuda
 from unet_model import Generator, Discriminator
-import os
 from dataloaders_v2 import load_celeba_condition, load_ffhq_condition, load_yfcc100m
 from options import load_options, print_options, DEFAULT_IMSIZE
-import time
-import numpy as np
 from metrics import fid
-from apex.optimizers import FusedAdam, FP16_Optimizer
-from apex.fp16_utils import convert_network
-from apex import amp
+
 torch.backends.cudnn.benchmark = True
 
 
@@ -24,7 +23,7 @@ def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
     epsilon = epsilon.to(fake_data.dtype)
     real_data = real_data.to(fake_data.dtype)
     x_hat = epsilon * real_data + (1-epsilon) * fake_data.detach()
-    x_hat = to_cuda(Variable(x_hat, requires_grad=True))
+    x_hat.requires_grad = True
     logits = discriminator(x_hat, condition, landmarks)
     grad = torch.autograd.grad(
         outputs=logits,
@@ -36,24 +35,17 @@ def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
     return grad_penalty.to(fake_data.dtype)
 
 
-class FP16Model(torch.nn.Module):
+class NetworkWrapper(torch.nn.Module):
 
     def __init__(self, network):
         super().__init__()
         self.network = network
-        #self.fp16_enabled = False
-        # self.network = convert_network(network, dtype=torch.half)
 
     def forward(self, *inputs):
-        #if self.fp16_enabled:
-        #    inputs = tuple(t.half() for t in inputs)
         return self.network(*inputs)
 
     def extend(self, channel_size):
         self.network.extend(channel_size)
-        # if self.network.current_imsize > 16:
-        #    self.fp16_enabled = True
-        #    self.network = convert_network(self.network, dtype=torch.half)
 
     def update_transition_value(self, value):
         self.network.transition_value = value
@@ -62,45 +54,17 @@ class FP16Model(torch.nn.Module):
         return self.network.new_parameters()
 
 
-class DataParallellWrapper(torch.nn.Module):
-
-    def __init__(self, model):
-        super().__init__()
-        self.model = model
-        self.forward_block = self.model
-
-    def forward(self, *x):
-        return self.forward_block(*x)
-
-    def extend(self, channel_size):
-        self.model.extend(channel_size)
-        self.forward_block = self.model
-
-    def summary(self):
-        self.model.summary()
-
-    def update_transition_value(self, value):
-        self.model.transition_value = value
-    
-    def new_parameters(self):
-        return self.model.new_parameters()
-
-
 def init_model(imsize, pose_size, start_channel_dim, image_channels):
     discriminator = Discriminator(image_channels,
                                   imsize,
-                                  int(start_channel_dim*2**0.5),
+                                  start_channel_dim,
                                   pose_size)
     generator = Generator(pose_size, start_channel_dim, image_channels)
     to_cuda([discriminator, generator])
-    discriminator = FP16Model(discriminator)
-    generator = FP16Model(generator)
+    discriminator = NetworkWrapper(discriminator)
+    generator = NetworkWrapper(generator)
 
     return discriminator, generator
-
-
-def adjust_dynamic_range(data):
-    return data*2-1
 
 
 def save_images(writer, images, global_step, directory):
@@ -112,7 +76,7 @@ def save_images(writer, images, global_step, directory):
     writer.add_image("Image", image_grid, global_step)
 
 
-def normalize_img(image):
+def denormalize_img(image):
     image = (image+1)/2
     image = utils.clip(image, 0, 1)
     return image
@@ -344,7 +308,7 @@ class Trainer:
         self.running_average_generator = Generator(self.pose_size,
                                                    self.start_channel_size,
                                                    self.image_channels)
-        self.running_average_generator = DataParallellWrapper(
+        self.running_average_generator = NetworkWrapper(
             self.running_average_generator)
         self.running_average_generator = to_cuda(
             self.running_average_generator)
@@ -360,7 +324,7 @@ class Trainer:
 
     def extend_models(self):
         current_channels = self.transition_channels[self.transition_step]
-        self.discriminator.extend(int(current_channels*2**0.5))
+        self.discriminator.extend(current_channels)
         self.generator.extend(current_channels)
         self.extend_running_average_generator(current_channels)
 
@@ -381,12 +345,9 @@ class Trainer:
         self.d_optimizer = FusedAdam(self.discriminator.parameters(),
                                      lr=self.learning_rate,
                                      betas=(0.0, 0.99))
-        #self.d_optimizer = amp_handle.wrap_optimizer(self.d_optimizer)
-        #self.d_optimizer = FP16_Optimizer(self.d_optimizer, dynamic_loss_scale=True)
         self.g_optimizer = FusedAdam(self.generator.parameters(),
                                      lr=self.learning_rate,
                                      betas=(0.0, 0.99))
-        #self.g_optimizer = FP16_Optimizer(self.g_optimizer, dynamic_loss_scale=True)
         self.generator, self.g_optimizer = amp.initialize(self.generator,
                                                          self.g_optimizer,
                                                          keep_batchnorm_fp32=False,
@@ -399,7 +360,6 @@ class Trainer:
                                                              opt_level='O1',
                                                              loss_scale="dynamic"
                                                              )                                                         
-        #self.g_optimizer = amp_handle.wrap_optimizer(self.g_optimizer)
 
     def log_variable(self, name, value, log_to_validation=False):
         if log_to_validation:
@@ -407,6 +367,26 @@ class Trainer:
                                               global_step=self.global_step)
         else:
             self.writer.add_scalar(name, value, global_step=self.global_step)
+
+    def save_transition_image(self, before):
+
+        prefetcher = DataPrefetcher(self.dataloader_train, self.transition_variable)
+        real_image, condition, landmark = prefetcher.next(self.transition_variable)
+
+        fake_data = self.generator(condition, landmark)
+        fake_data = denormalize_img(fake_data.detach())[:8]
+        real_data = denormalize_img(real_image)[:8]
+        condition = denormalize_img(condition)[:8]
+        to_save = torch.cat((real_data, condition, fake_data))
+        imname = "transition_after{}.jpg".format(self.current_imsize//2)
+        if before:
+            imname = "transition_before{}.jpg".format(self.current_imsize)
+        os.makedirs("lol", exist_ok=True)
+        filepath = os.path.join("lol",
+                                imname)
+        torchvision.utils.save_image(
+            fake_data[:64], filepath, nrow=8
+        )
 
     def validate_model(self):
         real_scores = []
@@ -439,8 +419,8 @@ class Trainer:
             wasserstein_distances.append(wasserstein_distance.mean().item())
             epsilon_penalties.append(epsilon_penalty.mean().item())
 
-            fake_data = normalize_img(fake_data.detach())
-            real_data = normalize_img(real_data)
+            fake_data = denormalize_img(fake_data.detach())
+            real_data = denormalize_img(real_data)
 
             start_idx = idx*self.batch_size
             end_idx = (idx+1)*self.batch_size
@@ -481,7 +461,7 @@ class Trainer:
                     self.running_average_generator.update_transition_value(
                         self.transition_variable)
                 real_data, condition, landmarks = prefetcher.next(self.transition_variable)
-                torchvision.utils.save_image(normalize_img(real_data), "test.jpg", nrow=10)
+                torchvision.utils.save_image(denormalize_img(real_data), "test.jpg", nrow=10)
                 # Forward G
                 fake_data = self.generator(condition, landmarks)
                 # Train Discriminator
@@ -504,23 +484,17 @@ class Trainer:
 
                 D_loss = D_loss.mean()
                 self.d_optimizer.zero_grad()
-                #self.d_optimizer.backward(D_loss)
-               # D_loss.backward()
                 with amp.scale_loss(D_loss, self.d_optimizer) as scaled_loss:
                     scaled_loss.backward()
                 self.d_optimizer.step()
 
                 # Forward G
-                # TODO: REMOVE!
-                #fake_data.requires_grad = True
                 fake_scores = self.discriminator(
                     fake_data, condition, landmarks)
                 G_loss = (-fake_scores).mean()
 
                 self.d_optimizer.zero_grad()
                 self.g_optimizer.zero_grad()
-                #self.g_optimizer.backward(G_loss)
-                #G_loss.backward()
                 with amp.scale_loss(G_loss, self.g_optimizer) as scaled_loss:
                     scaled_loss.backward()
                 self.g_optimizer.step()
@@ -551,7 +525,7 @@ class Trainer:
 
                 if (self.global_step) % (self.batch_size*500) == 0:
                     self.generator.eval()
-                    fake_data_sample = normalize_img(
+                    fake_data_sample = denormalize_img(
                         self.generator(condition, landmarks).detach().data)
                     save_images(self.writer, fake_data_sample,
                                 self.global_step, self.generated_data_dir)
@@ -561,13 +535,13 @@ class Trainer:
                     filename = "reals{0}_{1}x{1}.jpg".format(
                         self.global_step, imsize)
                     filepath = os.path.join(self.generated_data_dir, filename)
-                    to_save = normalize_img(real_data)
+                    to_save = denormalize_img(real_data)
                     torchvision.utils.save_image(to_save, filepath, nrow=10)
 
                     filename = "condition{0}_{1}x{1}.jpg".format(
                         self.global_step, imsize)
                     filepath = os.path.join(self.generated_data_dir, filename)
-                    to_save = normalize_img(condition[:, :3])
+                    to_save = denormalize_img(condition[:, :3])
                     torchvision.utils.save_image(to_save, filepath, nrow=10)
 
                 if self.global_step//self.batch_size*self.batch_size % (2e5//self.batch_size * self.batch_size) == 0:
@@ -585,21 +559,8 @@ class Trainer:
                             self.transition_variable)
                         self.save_checkpoint(epoch)
                     elif self.current_imsize < self.max_imsize:
-                        prefetcher = DataPrefetcher(self.dataloader_train, self.transition_variable)
-                        real_image, condition, landmark = prefetcher.next(self.transition_variable)
-
-                        fake_data = self.generator(condition, landmark)
-                        fake_data = normalize_img(fake_data.detach())[:8]
-                        real_data = normalize_img(real_image)[:8]
-                        condition = normalize_img(condition)[:8]
-                        to_save = torch.cat((real_data, condition, fake_data))
-                        os.makedirs("lol", exist_ok=True)
-                        filepath = os.path.join("lol",
-                                                "transition_before{}.jpg".format(self.current_imsize))
-                        torchvision.utils.save_image(
-                            fake_data[:64], filepath, nrow=8
-                        )
-
+                        # Save image before transition
+                        self.save_transition_image(True)
                         self.extend_models()
                         del self.dataloader_train, self.dataloader_val
                         self.dataloader_train, self.dataloader_val = load_dataset(
@@ -612,20 +573,9 @@ class Trainer:
                             self.transition_variable)
                         self.generator.update_transition_value(
                             self.transition_variable)
-                        prefetcher = DataPrefetcher(self.dataloader_val, self.transition_variable)
-                        real_image, condition, landmark = prefetcher.next(self.transition_variable)
-
-                        fake_data = self.generator(condition, landmark)
-                        fake_data = normalize_img(fake_data.detach())[:8]
-                        real_data = normalize_img(real_image)[:8]
-                        condition = normalize_img(condition)[:8]
-                        to_save = torch.cat((real_data, condition, fake_data))
-                        os.makedirs("lol", exist_ok=True)
-                        filepath = os.path.join("lol",
-                                                "transition_after{}.jpg".format(self.current_imsize//2))
-                        torchvision.utils.save_image(
-                            fake_data[:64], filepath, nrow=8
-                        )
+                        
+                        # Save image after transition
+                        self.save_transition_image(False)
                         self.save_checkpoint(epoch)
 
                         break

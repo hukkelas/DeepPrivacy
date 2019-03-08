@@ -1,7 +1,7 @@
 import torch 
 from utils import load_checkpoint
 from scripts.utils import image_to_numpy, init_generator, get_model_name
-from train import normalize_img, preprocess_images
+from train import denormalize_img, preprocess_images
 from dataloaders import  load_celeba_condition
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,8 +26,8 @@ if __name__ == "__main__":
         z = preprocess_images(z, transition_value)
 
         d = g(z, None)
-        d = normalize_img(d)
-        c = normalize_img(z)
+        d = denormalize_img(d)
+        c = denormalize_img(z)
         conditions.append(c.data.cpu())
         images.append(d.data.cpu())
         originals.append(orig.data.cpu())

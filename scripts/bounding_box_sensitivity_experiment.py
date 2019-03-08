@@ -2,7 +2,7 @@ import torch
 from unet_model import Generator
 import pandas as pd
 from utils import load_checkpoint
-from train import DataParallellWrapper, normalize_img, adjust_dynamic_range, preprocess_images
+from train import DataParallellWrapper, denormalize_img, adjust_dynamic_range, preprocess_images
 import torchvision
 from dataloaders import load_celeba_condition
 from torchvision.transforms.functional import to_tensor, to_pil_image
@@ -67,7 +67,7 @@ if __name__ == "__main__":
         im = preprocess_images(im, 1.0).cuda()
         #pose = torch.zeros((1, 14))
         im = g(im, pose)
-        im = normalize_img(im)
+        im = denormalize_img(im)
         
         torchvision.utils.save_image(im.data, "{}/out/{:.3f}.jpg".format(savedir, percentages[i]))
 

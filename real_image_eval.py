@@ -1,7 +1,7 @@
 import torch 
 from unet_model import Generator
 from utils import load_checkpoint
-from train import preprocess_images, normalize_img
+from train import preprocess_images, denormalize_img
 from torchvision.transforms.functional import to_tensor
 import matplotlib
 import numpy as np
@@ -56,7 +56,7 @@ if __name__ == "__main__":
             to_generate = to_tensor(to_generate)[None, :, :, :]
             to_generate = preprocess_images(to_generate, 1.0).cuda()
             to_generate = g(to_generate, None)
-            to_generate = normalize_img(to_generate)
+            to_generate = denormalize_img(to_generate)
 
             to_generate = image_to_numpy(to_generate)[0]
             to_generate = (to_generate * 255).astype("uint8")

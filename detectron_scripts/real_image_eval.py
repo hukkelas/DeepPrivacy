@@ -3,7 +3,7 @@ import matplotlib
 matplotlib.use("agg")
 import matplotlib.pyplot as plt
 from utils import load_checkpoint
-from train import preprocess_images, normalize_img
+from train import preprocess_images, denormalize_img
 from torchvision.transforms.functional import to_tensor
 import numpy as np
 import utils
@@ -196,7 +196,7 @@ if __name__ == "__main__":
             debug_image = to_generate.clone()
             to_generate = preprocess_images(to_generate, 1.0).cuda()
             to_generate = g(to_generate, final_keypoint) #  leye_x, leye_y,reye_x, reye_y, nose_x, nose_y,
-            to_generate = normalize_img(to_generate)
+            to_generate = denormalize_img(to_generate)
 
             to_generate = image_to_numpy(to_generate.detach().cpu())[0]
             to_generate = (to_generate * 255).astype("uint8")
