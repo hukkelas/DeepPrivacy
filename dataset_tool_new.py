@@ -26,6 +26,7 @@ def plot_bbox(x0, y0, width, height):
     y = [y0, y1, y1, y0, y0]
     plt.plot(x, y, "--")
 
+
 def quadratic_bounding_box(x0, y0, width, height, imshape):
     min_side = min(height, width)
     if height != width:
@@ -77,16 +78,43 @@ def quadratic_bounding_box(x0, y0, width, height, imshape):
 
 
 def expand_bounding_box(x0, y0, width, height, percentage, imshape):
-    y0 = y0 - int(height*percentage)
-    y0 = max(0, y0)
-    height = height + int(height*percentage*2)
-    height = min(height, imshape[0])
-    x0 = x0 - int(width*percentage)
-    x0 = max(0, x0)
-    width = width + int(width*percentage*2)
-    width = min(width, imshape[1])
-    
     x0, y0, width, height = quadratic_bounding_box(x0, y0, width, height, imshape)
+    expanding_factor = int(max(height, width) * percentage)
+    possible_max_expansion = [(imshape[0] - width)//2,
+                              (imshape[1] - height)//2,
+                              expanding_factor]
+    expanding_factor = min(possible_max_expansion)
+    # Expand height
+    y0 = y0 - expanding_factor
+    y0 = max(0, y0)
+
+    height += expanding_factor*2
+    if height > imshape[0]:
+        y0 -= (imshape[0] - height)
+        height = imshape[0]
+
+    if height + y0 > imshape[0]:
+        y0 -= (height + y0 - imshape[0])
+
+    assert y0 >= 0, "Y0 is minus"
+    assert height <= imshape[0], "Height is larger than image."
+    # Expand width
+    x0 = x0 - expanding_factor
+    x0 = max(0, x0)
+
+    width += expanding_factor*2
+    if width > imshape[1]:
+        x0 -= (imshape[1] - width)
+        width = imshape[1]
+
+    if width + x0 > imshape[1]:
+        x0 -= (width + x0 - imshape[1])
+    assert x0 + width <= imshape[1]
+    assert y0 + height <= imshape[0]
+    assert width == height, "HEIGHT IS NOT EQUAL WIDTH!!"
+    assert x0 >= 0, "Y0 is minus"
+    assert width <= imshape[1], "Height is larger than image."
+    #x0, y0, width, height = quadratic_bounding_box(x0, y0, width, height, imshape)
     return x0, y0, width, height
 
 def anonymize_image_and_save(imname, x0, y0, width, height):
@@ -147,18 +175,23 @@ def save_image_batch(idx, impaths, target_dir):
         images.append(plt.imread(impath))
 
     for imsize in imsizes:
-        to_save = torch.zeros((len(impaths), 3, imsize, imsize), dtype=torch.float32)
+        to_save = np.zeros((len(impaths), imsize, imsize, 3), dtype=np.uint8)
+        #to_save = torch.zeros((len(impaths), 3, imsize, imsize), dtype=torch.float32)
         for i, im in enumerate(images):
                 im = im[:, :, :3]
                 im = cv2.resize(im, (imsize, imsize), interpolation=cv2.INTER_AREA)
-                im = to_tensor(im)
-                assert im.max() <= 1.0
-                assert im.dtype == torch.float32
+                
+                #im = (im*255).astype(np.uint8)
+                #im = to_tensor(im)
+                assert im.dtype == np.uint8
+                #assert im.dtype == torch.float32
                 to_save[i] = im
         td = os.path.join(target_dir, str(imsize))
-        target_path = os.path.join(td, "{}.torch".format(str(idx)))
+        target_path = os.path.join(td, "{}.npy".format(str(idx)))
         os.makedirs(td, exist_ok=True)
-        torch.save(to_save, target_path)
+        # 
+        np.save(target_path, to_save)
+        #torch.save(to_save, target_path)
         del to_save
     image_heights = [im.shape[0] for im in images]
     image_widths = [im.shape[1] for im in images]        
@@ -249,11 +282,11 @@ def load_and_adjust_landmarks(image_start_indices, image_paths, landmark_df):
 
 
 def dataset_to_torch(image_start_indices):
-    target_dir = os.path.join("data", "celeba_torch")
+    target_dir = os.path.join("data", "celeba_numpy")
     # Save real
     target_original_dir = os.path.join(target_dir, "original")
     impaths = list(image_start_indices.keys())
-    landmark_df = pd.read_csv("celeba_keypoints.csv")
+    landmark_df = pd.read_csv("data/celeba/celeba_keypoints.csv")
     landmark_impaths = set(landmark_df.imname.values)
     impaths = [os.path.basename(impath) for impath in impaths]
     impaths = set(impaths)
