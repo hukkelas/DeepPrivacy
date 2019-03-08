@@ -385,7 +385,7 @@ class Trainer:
         filepath = os.path.join("lol",
                                 imname)
         torchvision.utils.save_image(
-            fake_data[:64], filepath, nrow=8
+            to_save, filepath, nrow=8
         )
 
     def validate_model(self):
