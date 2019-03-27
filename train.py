@@ -12,9 +12,9 @@ from unet_model import Generator, Discriminator
 from dataloaders_v2 import load_celeba_condition, load_ffhq_condition, load_yfcc100m
 from options import load_options, print_options, DEFAULT_IMSIZE
 from metrics import fid
+import tqdm
 
 torch.backends.cudnn.benchmark = True
-
 
 def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() - 1)
@@ -172,6 +172,7 @@ class Trainer:
         self.transition_step = 0
         self.start_channel_size = options.start_channel_size
         self.latest_switch = 0
+        self.opt_level = options.opt_level
         current_channels = options.start_channel_size
         self.transition_channels = [
             current_channels,
@@ -229,7 +230,8 @@ class Trainer:
             "running_average_generator": self.running_average_generator.state_dict(),
             "running_average_generator_decay": self.running_average_generator_decay,
             "latest_switch": self.latest_switch,
-            "pose_size": self.pose_size
+            "pose_size": self.pose_size,
+            "opt_level": self.opt_level
 
         }
         save_checkpoint(state_dict,
@@ -265,7 +267,7 @@ class Trainer:
             self.latest_switch = ckpt["latest_switch"]
             self.global_step = ckpt["global_step"]
             self.start_time = time.time() - ckpt["total_time"] * 60
-
+            self.opt_level = ckpt["opt_level"]
             current_channels = ckpt["start_channel_size"]
             self.transition_channels = [
                 current_channels,
@@ -342,24 +344,16 @@ class Trainer:
                 ((1-self.running_average_generator_decay) * current_parameter.float())
 
     def init_optimizers(self):
-        self.d_optimizer = FusedAdam(self.discriminator.parameters(),
+        self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(),
                                      lr=self.learning_rate,
                                      betas=(0.0, 0.99))
-        self.g_optimizer = FusedAdam(self.generator.parameters(),
+        self.g_optimizer = torch.optim.Adam(self.generator.parameters(),
                                      lr=self.learning_rate,
                                      betas=(0.0, 0.99))
-        self.generator, self.g_optimizer = amp.initialize(self.generator,
-                                                         self.g_optimizer,
-                                                         keep_batchnorm_fp32=False,
-                                                         opt_level='O1',
-                                                         loss_scale="dynamic"
-                                                         )
-        self.discriminator, self.d_optimizer = amp.initialize(self.discriminator,
-                                                             self.d_optimizer,
-                                                             keep_batchnorm_fp32=False,
-                                                             opt_level='O1',
-                                                             loss_scale="dynamic"
-                                                             )                                                         
+        [self.generator, self.discriminator], [self.g_optimizer, self.d_optimizer] = amp.initialize(
+            [self.generator, self.discriminator],
+            [self.g_optimizer, self.d_optimizer],
+            opt_level=self.opt_level)
 
     def log_variable(self, name, value, log_to_validation=False):
         if log_to_validation:
@@ -405,7 +399,7 @@ class Trainer:
                                    self.current_imsize))
         data_prefetcher = DataPrefetcher(self.dataloader_val,
                                          self.transition_variable)
-        for idx in range(len(self.dataloader_val)):
+        for idx in tqdm.trange(len(self.dataloader_val)):
             real_data, condition, landmarks = data_prefetcher.next(self.transition_variable)
             fake_data = self.running_average_generator(condition,
                                                        landmarks)
@@ -414,10 +408,10 @@ class Trainer:
                                             landmarks)
             wasserstein_distance = (real_score - fake_score).squeeze()
             epsilon_penalty = (real_score**2).squeeze()
-            real_scores.append(real_score.mean().item())
-            fake_scores.append(fake_score.mean().item())
-            wasserstein_distances.append(wasserstein_distance.mean().item())
-            epsilon_penalties.append(epsilon_penalty.mean().item())
+            real_scores.append(real_score.mean().detach().item())
+            fake_scores.append(fake_score.mean().detach().item())
+            wasserstein_distances.append(wasserstein_distance.mean().detach().item())
+            epsilon_penalties.append(epsilon_penalty.mean().detach().item())
 
             fake_data = denormalize_img(fake_data.detach())
             real_data = denormalize_img(real_data)
@@ -425,9 +419,10 @@ class Trainer:
             start_idx = idx*self.batch_size
             end_idx = (idx+1)*self.batch_size
             real_images[start_idx:end_idx] = real_data.cpu().float()
-            fake_images[start_idx:end_idx] = fake_data.cpu().float()
-            del real_data, fake_data, real_score, fake_score
+            fake_images[start_idx:end_idx] = fake_data.detach().cpu().float()
+            del real_data, fake_data, real_score, fake_score, wasserstein_distance, epsilon_penalty
         if self.current_imsize >= 64:
+            print("Calculating fid")
             fid_val = fid.calculate_fid(real_images, fake_images, 8)
             print("FID:", fid_val)
             self.log_variable("stats/fid", np.mean(fid_val), True)
@@ -445,12 +440,19 @@ class Trainer:
                     directory)
         self.discriminator.train()
 
+    def check_loss_scale(self):
+        for optimizer in [self.d_optimizer, self.g_optimizer]:
+            if optimizer.loss_scaler._loss_scale <= (1/2**15):
+                optimizer.loss_scaler._loss_scale = 1
+                print("Loss scale was too small. Scaled back to 1")
+
     def train(self):
-        for epoch in range(self.start_epoch, self.num_epochs):
+        for epoch in range(self.start_epoch, int(1e16)):
             prefetcher = DataPrefetcher(self.dataloader_train, self.transition_variable)
             for i in range(len(self.dataloader_train)):
                 batch_start_time = time.time()
                 self.generator.train()
+                self.check_loss_scale()
                 if self.is_transitioning:
                     self.transition_variable = (
                         (self.global_step-1) % self.transition_iters) / self.transition_iters

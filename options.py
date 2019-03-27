@@ -15,6 +15,7 @@ DEFAULT_TRANSITION_ITERS = 12e5
 DEFAULT_GENERATOR_RUNNING_AVERAGE_DECAY = 0.999
 DEFAULT_POSE_SIZE = 14
 OPTIONS_DIR = "options"
+DEFAULT_OPT_LEVEL = "O1"
 os.makedirs(OPTIONS_DIR, exist_ok=True)
 
 
@@ -84,9 +85,13 @@ def load_options():
                       help="Set the decay rate for the running average of the generator",
                       default=DEFAULT_GENERATOR_RUNNING_AVERAGE_DECAY,
                       type=float)
+    parser.add_option("--opt-level", dest="opt_level",
+                      help="Set the optimization level for APEX",
+                      default=DEFAULT_OPT_LEVEL,
+                      type=str)
 
     options, _ = parser.parse_args()
-
+    
     validate_start_channel_size(options.max_imsize, options.start_channel_size)
 
     options.checkpoint_dir = os.path.join("checkpoints", options.model_name)
@@ -105,7 +110,7 @@ def load_options():
     scheduled_batch_size = {imsize: int(batch_sizes[i]) for i, imsize in enumerate(imsizes)}
 
     options.batch_size = scheduled_batch_size
-
+    assert options.opt_level in ["O1","O0"], "Optimization level not correct. It was: {}".format(options.opt_level)
 
     print_options(vars(options))
     write_options(vars(options), options.model_name)        

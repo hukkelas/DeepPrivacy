@@ -8,7 +8,8 @@ from torchvision import transforms
 
 class DeepPrivacyDataset(torch.utils.data.Dataset):
 
-    def __init__(self, images, bounding_boxes, landmarks):
+    def __init__(self, images, bounding_boxes, landmarks, augment_data):
+        self.augment_data = augment_data
         self.images = images
         self.imsize = self.images.shape[1]
         self.bounding_boxes = bounding_boxes
@@ -24,14 +25,16 @@ class DeepPrivacyDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         im = self.images[index]
         im = transforms.functional.to_pil_image(im)
-        bbox = self.bounding_boxes[index]
-        bbox = bounding_box_data_augmentation(bbox, self.imsize, 0.2)
         landmarks = self.landmarks[index]
-        if np.random.rand() > 0.5:
-            im = transforms.functional.hflip(im)
-            x = landmarks[range(landmarks.shape[0], 2)]
-            landmarks[range(landmarks.shape[0], 2)] = 1 - x
-            bbox[[0, 2]] = self.imsize - bbox[[2, 0]]
+        bbox = self.bounding_boxes[index]
+        if self.augment_data:
+            bbox = bounding_box_data_augmentation(bbox, self.imsize, 0.2)
+            
+            if np.random.rand() > 0.5:
+                im = transforms.functional.hflip(im)
+                x = landmarks[range(landmarks.shape[0], 2)]
+                landmarks[range(landmarks.shape[0], 2)] = 1 - x
+                bbox[[0, 2]] = self.imsize - bbox[[2, 0]]
         im = np.asarray(im)
         condition = im.copy()
         condition = cut_bounding_box(condition, bbox)
@@ -93,8 +96,8 @@ def load_dataset(dirpath, imsize, batch_size):
     bbox_train, bbox_val = bounding_boxes[:-validation_size], bounding_boxes[-validation_size:]
     lm_train, lm_val = landmarks[:-validation_size], landmarks[-validation_size:]
 
-    dataset_train = DeepPrivacyDataset(images_train, bbox_train, lm_train)
-    dataset_val = DeepPrivacyDataset(images_val, bbox_val, lm_val)
+    dataset_train = DeepPrivacyDataset(images_train, bbox_train, lm_train, True)
+    dataset_val = DeepPrivacyDataset(images_val, bbox_val, lm_val, False)
     print("LEN DATASET VAL:", len(dataset_val), len(images_val))
     dataloader_train = torch.utils.data.DataLoader(dataset_train,
                                                    batch_size=batch_size,
@@ -119,7 +122,7 @@ def load_celeba_condition(batch_size, imsize=128):
 
 
 def load_yfcc100m(batch_size, imsize=128):
-    dirpath = os.path.join("data", "yfcc100m_torch")
+    dirpath = os.path.join("data", "yfcc100m_torch3")
     return load_dataset(dirpath, imsize, batch_size)
 
 
@@ -151,6 +154,9 @@ def cut_bounding_box(condition, bounding_boxes):
     x1 = bounding_boxes[2]
     y1 = bounding_boxes[3]
     previous_image = condition[y0:y1, x0:x1]
+    #print(previous_image.max(), previous_image.min())
+    if previous_image.size == 0:
+        return condition
     mean = previous_image.mean()
     std = previous_image.std()
     replacement = np.random.normal(mean, std,
