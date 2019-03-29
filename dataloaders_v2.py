@@ -91,7 +91,7 @@ def load_dataset(dirpath, imsize, batch_size):
     assert os.path.isfile(
         landmark_filepath), "Did not find the landmark data. Looked in: {}".format(landmark_filepath)
     landmarks = torch.load(landmark_filepath).float() / imsize
-    validation_size = int(0.05*len(images))
+    validation_size = int(0.02*len(images))
     images_train, images_val = images[:-validation_size], images[-validation_size:]
     bbox_train, bbox_val = bounding_boxes[:-validation_size], bounding_boxes[-validation_size:]
     lm_train, lm_val = landmarks[:-validation_size], landmarks[-validation_size:]

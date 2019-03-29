@@ -3,12 +3,12 @@ import os
 import numpy as np
 import tensorboardX
 import torch
-from apex.optimizers import FusedAdam
+
 from apex import amp
 import torchvision
 import utils
 from utils import load_checkpoint, save_checkpoint, to_cuda
-from unet_model import Generator, Discriminator
+from unet_model import Generator, Discriminator, SlimGenerator
 from dataloaders_v2 import load_celeba_condition, load_ffhq_condition, load_yfcc100m
 from options import load_options, print_options, DEFAULT_IMSIZE
 from metrics import fid
@@ -16,7 +16,13 @@ import tqdm
 
 torch.backends.cudnn.benchmark = True
 
-def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
+
+def isnan(x):
+    return x != x
+
+
+@amp.float_function
+def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks, loss_scaler):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() - 1)
     epsilon = torch.rand(epsilon_shape)
     epsilon = to_cuda(epsilon)
@@ -25,12 +31,22 @@ def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks):
     x_hat = epsilon * real_data + (1-epsilon) * fake_data.detach()
     x_hat.requires_grad = True
     logits = discriminator(x_hat, condition, landmarks)
+    logits = logits.sum()
+    logits = logits * loss_scaler.loss_scale()
     grad = torch.autograd.grad(
         outputs=logits,
         inputs=x_hat,
         grad_outputs=to_cuda(torch.ones(logits.shape)).to(fake_data.dtype),
         create_graph=True
-    )[0].view(x_hat.shape[0], -1)
+    )[0] #.view(x_hat.shape[0], -1)
+    if amp.scaler.scale_check_overflow_python(grad, 1/loss_scaler.loss_scale(), grad) or isnan(grad.max()):
+        print("Overflow in gradient penalty calculation.")
+        loss_scaler._loss_scale /= 2
+        print("Scaling down loss to:", loss_scaler._loss_scale)
+        return None
+
+    grad = grad.view(x_hat.shape[0], -1)
+
     grad_penalty = ((grad.norm(p=2, dim=1) - 1)**2)
     return grad_penalty.to(fake_data.dtype)
 
@@ -124,7 +140,7 @@ class DataPrefetcher():
             self.next_condition = interpolate_image(self.pool,
                                                     self.next_condition,
                                                     transition_variable)
-    
+
     def next(self, transition_variable):
         torch.cuda.current_stream().wait_stream(self.stream)
         next_image = self.next_image
@@ -145,7 +161,7 @@ def interpolate_image(pool, images, transition_variable):
 class Trainer:
 
     def __init__(self, options):
-
+        self.prev_step = 0
         # Set Hyperparameters
         self.batch_size_schedule = options.batch_size
         self.batch_size = options.batch_size[options.imsize]
@@ -203,6 +219,11 @@ class Trainer:
         self.discriminator.update_transition_value(self.transition_variable)
         self.generator.update_transition_value(self.transition_variable)
 
+        if self.opt_level == "O0":
+            self.wgan_gp_scaler = amp.scaler.LossScaler(1)
+        else:
+            self.wgan_gp_scaler = amp.scaler.LossScaler("dynamic")
+
     def save_checkpoint(self, epoch):
         filename = "step_{}.ckpt".format(self.global_step)
         filepath = os.path.join(self.checkpoint_dir, filename)
@@ -231,7 +252,7 @@ class Trainer:
             "running_average_generator_decay": self.running_average_generator_decay,
             "latest_switch": self.latest_switch,
             "pose_size": self.pose_size,
-            "opt_level": self.opt_level
+            "opt_level": self.opt_level,
 
         }
         save_checkpoint(state_dict,
@@ -251,7 +272,7 @@ class Trainer:
             self.num_epochs = ckpt["num_epochs"]
             self.learning_rate = ckpt["learning_rate"]
             self.running_average_generator_decay = ckpt["running_average_generator_decay"]
-
+            self.start_channel_size = ckpt["start_channel_size"]
             # Image settings
             self.current_imsize = ckpt["current_imsize"]
             self.image_channels = ckpt["image_channels"]
@@ -314,15 +335,15 @@ class Trainer:
             self.running_average_generator)
         self.running_average_generator = to_cuda(
             self.running_average_generator)
-        self.running_average_generator = self.running_average_generator.float()
+        self.running_average_generator = amp.initialize(self.running_average_generator, None, opt_level=self.opt_level)
 
     def extend_running_average_generator(self, current_channels):
         g = self.running_average_generator
         g.extend(current_channels)
         for avg_param, cur_param in zip(g.new_parameters(), self.generator.new_parameters()):
-            assert avg_param.data.shape == cur_param.data.shape
+            assert avg_param.data.shape == cur_param.data.shape, "AVG param: {}, cur_param: {}".format(avg_param.shape, cur_param.shape)
             avg_param.data = cur_param.data
-        self.running_average_generator = g.float()
+        self.running_average_generator = amp.initialize(self.running_average_generator, None, opt_level=self.opt_level)
 
     def extend_models(self):
         current_channels = self.transition_channels[self.transition_step]
@@ -363,8 +384,7 @@ class Trainer:
             self.writer.add_scalar(name, value, global_step=self.global_step)
 
     def save_transition_image(self, before):
-
-        prefetcher = DataPrefetcher(self.dataloader_train, self.transition_variable)
+        prefetcher = DataPrefetcher(self.dataloader_val, self.transition_variable)
         real_image, condition, landmark = prefetcher.next(self.transition_variable)
 
         fake_data = self.generator(condition, landmark)
@@ -442,9 +462,11 @@ class Trainer:
 
     def check_loss_scale(self):
         for optimizer in [self.d_optimizer, self.g_optimizer]:
-            if optimizer.loss_scaler._loss_scale <= (1/2**15):
-                optimizer.loss_scaler._loss_scale = 1
-                print("Loss scale was too small. Scaled back to 1")
+            if optimizer.loss_scaler._loss_scale == 0:
+                optimizer.loss_scaler._loss_scale = 2**15
+                print("Loss scale was too small. Scaled back to 1. Step:", self.prev_step, "Current step:", self.global_step)
+                self.prev_step = self.global_step
+                
 
     def train(self):
         for epoch in range(self.start_epoch, int(1e16)):
@@ -476,10 +498,12 @@ class Trainer:
                 wasserstein_distance = (real_scores - fake_scores).squeeze()
                 gradient_pen = gradient_penalty(
                     real_data.data, fake_data.detach(), self.discriminator,
-                    condition, landmarks)
+                    condition, landmarks, self.wgan_gp_scaler)
+                if gradient_pen is None:
+                    continue
                 # Epsilon penalty
                 epsilon_penalty = (real_scores ** 2).squeeze()
-
+                assert epsilon_penalty.shape == gradient_pen.shape
                 assert wasserstein_distance.shape == epsilon_penalty.shape
                 D_loss = - wasserstein_distance
                 D_loss += gradient_pen * 10 + epsilon_penalty * 0.001
@@ -524,7 +548,6 @@ class Trainer:
                     "stats/training_time_minutes", self.total_time)
                 self.update_running_average_generator()
                 self.global_step += self.batch_size
-
                 if (self.global_step) % (self.batch_size*500) == 0:
                     self.generator.eval()
                     fake_data_sample = denormalize_img(
@@ -546,7 +569,7 @@ class Trainer:
                     to_save = denormalize_img(condition[:, :3])
                     torchvision.utils.save_image(to_save, filepath, nrow=10)
 
-                if self.global_step//self.batch_size*self.batch_size % (2e5//self.batch_size * self.batch_size) == 0:
+                if self.global_step//self.batch_size*self.batch_size % (2e6//self.batch_size * self.batch_size) == 0:
                     self.save_checkpoint(epoch)
                     self.validate_model()
                 if self.global_step >= (self.latest_switch + self.transition_iters):

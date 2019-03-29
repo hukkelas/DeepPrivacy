@@ -46,10 +46,11 @@ from utils import to_cuda
 from metrics.inception import InceptionV3
 dims=2048
 block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
-
+from apex import amp
 def get_model():
     model = InceptionV3([block_idx])
     model = to_cuda(model)
+    model = amp.initialize(model, None, opt_level="O1")
     return model
 
 def get_activations(images, model, batch_size=64):
