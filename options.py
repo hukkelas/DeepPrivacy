@@ -3,6 +3,7 @@ from wordgenerator import generate_random_word
 import os
 import math
 import json
+import torch
 DEFAULT_NUM_EPOCHS = 500
 DEFAULT_BATCH_SIZE = "256,256,256,128,72,24,8,7,7" # V100-32GB settings
 DEFAULT_N_CRITIC = 1
@@ -29,6 +30,8 @@ def validate_start_channel_size(max_imsize, start_channel_size):
 
 def print_options(dic):
     #dic = vars(options)
+    if "local_rank" in dic and dic["local_rank"] != 0:
+        return
     print("="*80)
     print("OPTIONS USED:")
     banned_keys = ["G", "D", "g_optimizer", "d_optimizer", "z_sample", "running_average_generator"]
@@ -40,10 +43,25 @@ def print_options(dic):
 
 
 def write_options(options, name):
+    if options["local_rank"] != 0:
+        return
     path = os.path.join(OPTIONS_DIR, name, "options.json")
     os.makedirs(os.path.join(OPTIONS_DIR, name), exist_ok=True)
     with open(path, "w") as f:
         json.dump(options, f)
+
+
+def check_distributed(options):
+    options.world_size = 1
+    if "WORLD_SIZE" in os.environ:
+        options.distributed = int(os.environ["WORLD_SIZE"]) > 1
+    else:
+        options.distributed = False
+    if options.distributed:
+        print("Enabling distributed training. Number of GPUs:", os.environ["WORLD_SIZE"])
+        torch.cuda.set_device(options.local_rank)
+        torch.distributed.init_process_group(backend="nccl", init_method="env://")
+        options.world_size = torch.distributed.get_world_size()
 
 
 def load_options():
@@ -89,6 +107,7 @@ def load_options():
                       help="Set the optimization level for APEX",
                       default=DEFAULT_OPT_LEVEL,
                       type=str)
+    parser.add_option("--local_rank", default=0, type=int,)
 
     options, _ = parser.parse_args()
     
@@ -113,7 +132,8 @@ def load_options():
     assert options.opt_level in ["O1","O0"], "Optimization level not correct. It was: {}".format(options.opt_level)
 
     print_options(vars(options))
-    write_options(vars(options), options.model_name)        
+    write_options(vars(options), options.model_name)
+    check_distributed(options)
     return options
 
 

@@ -78,7 +78,7 @@ def load_ffhq_condition(batch_size, imsize=128):
     return ConditionedCelebADataset("data/ffhq_torch", imsize, batch_size, landmarks_total=False)
 
 
-def load_dataset(dirpath, imsize, batch_size):
+def load_dataset(dirpath, imsize, batch_size, distributed):
     images = load_numpy_files(os.path.join(dirpath, "original", str(imsize)))
     bounding_box_filepath = os.path.join(
         dirpath, "bounding_box", "{}.torch".format(imsize))
@@ -99,9 +99,16 @@ def load_dataset(dirpath, imsize, batch_size):
     dataset_train = DeepPrivacyDataset(images_train, bbox_train, lm_train, True)
     dataset_val = DeepPrivacyDataset(images_val, bbox_val, lm_val, False)
     print("LEN DATASET VAL:", len(dataset_val), len(images_val))
+
+    train_sampler, val_sampler = None, None
+    if distributed:
+        train_sampler = torch.utils.data.DistributedSampler(dataset_train)
+        val_sampler = torch.utils.data.DistributedSampler(dataset_val)
+    
     dataloader_train = torch.utils.data.DataLoader(dataset_train,
                                                    batch_size=batch_size,
-                                                   shuffle=True,
+                                                   shuffle=(train_sampler is None),
+                                                   sampler=train_sampler,
                                                    num_workers=8,
                                                    drop_last=True,
                                                    pin_memory=True,
@@ -110,6 +117,7 @@ def load_dataset(dirpath, imsize, batch_size):
                                                  batch_size=batch_size,
                                                  shuffle=False,
                                                  num_workers=2,
+                                                 sampler=val_sampler,
                                                  drop_last=True,
                                                  pin_memory=True,
                                                  collate_fn=fast_collate)
@@ -121,9 +129,9 @@ def load_celeba_condition(batch_size, imsize=128):
     return load_dataset(dirpath, imsize, batch_size)
 
 
-def load_yfcc100m(batch_size, imsize=128):
+def load_yfcc100m(batch_size, imsize, distributed):
     dirpath = os.path.join("data", "yfcc100m_torch3")
-    return load_dataset(dirpath, imsize, batch_size)
+    return load_dataset(dirpath, imsize, batch_size, distributed)
 
 
 def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):

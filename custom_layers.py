@@ -30,7 +30,7 @@ class WSConv2d(nn.Module):
         
     def forward(self, x):
         #return self.conv(x)
-        return self.conv(x) * self.wtScale + self.bias
+        return self.conv(x * self.wtScale) + self.bias
 
     def __repr__(self):
         return self.__class__.__name__ + self.name
@@ -50,7 +50,7 @@ class WSLinear(nn.Module):
         nn.init.constant_(self.bias, val=0)
 
     def forward(self, x):
-        return self.linear(x) * self.wtScale + self.bias
+        return self.linear(x * self.wtScale) + self.bias
 
 class PixelwiseNormalization(nn.Module):
 

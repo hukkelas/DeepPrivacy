@@ -58,9 +58,7 @@ def generate_pose_channel_images(min_imsize, max_imsize, device, pose_informatio
             [torch.ones(num_poses, dtype=torch.long)*k for k in range(batch_size)])
         pose_indexes[(max_imsize, batch_size)] = torch.arange(0, num_poses).repeat(batch_size)
     batch_idx = batch_indexes[(max_imsize, batch_size)]
-    pose_idx = pose_indexes[(max_imsize, batch_size)]
-
-    
+    pose_idx = pose_indexes[(max_imsize, batch_size)].clone()
     # All poses that are outside image, we move to the last pose channel
     illegal_mask = ((pose_x < 0) + (pose_x >= 1.0) + (pose_y < 0) + (pose_y >= 1.0)) != 0
     pose_idx[illegal_mask] = num_poses
@@ -153,12 +151,15 @@ class Generator(nn.Module):
             WSConv2d(output_dim, self.image_channels, 1, 0))
 
         self.new_up = to_cuda(nn.Sequential(
+            #conv_bn_relu(self.prev_channel_size*2+self.num_poses, self.prev_channel_size, 1, 0),
             UnetUpsamplingBlock(self.prev_channel_size*2+self.num_poses, output_dim)
         ))
         self.prev_channel_size = output_dim
 
     def new_parameters(self):
-        return list(self.new_down.parameters()) + list(self.to_rgb_new.parameters())
+        new_paramters = list(self.new_down.parameters()) + list(self.to_rgb_new.parameters())
+        new_paramters += list(self.new_up.parameters()) + list(self.from_rgb_new.parameters())
+        return new_paramters
 
     def forward(self, x_in, pose_info):
         unet_skips = []
@@ -176,14 +177,12 @@ class Generator(nn.Module):
             x = block(x)
             unet_skips.append(x)
         x = self.core_blocks_down[-1](x)
-
         pose_channels = generate_pose_channel_images(4,
                                                      self.current_imsize, 
                                                      x_in.device,
                                                      pose_info,
                                                      x_in.dtype)
         x = torch.cat((x, pose_channels[0]), dim=1)
-
         x = self.core_blocks_up[0](x)
 
         for idx, block in enumerate(self.core_blocks_up[1:]):
@@ -210,6 +209,28 @@ def conv_module_bn(dim_in, dim_out, kernel_size, padding):
     )
 
 
+class ResNetBlock(nn.Module):
+
+    def __init__(self, num_channels, num_conv):
+        super(ResNetBlock, self).__init__()
+        blocks = []
+        for i in range(num_conv):
+            blocks.append(
+                nn.Sequential(
+                    PixelwiseNormalization(),
+                    nn.LeakyReLU(negative_slope=.2),
+                    WSConv2d(num_channels, num_channels, 3, 1)
+                )
+            )
+        self.conv = nn.Sequential(*blocks)
+
+    def forward(self, x):
+        prev = x
+        block_out = self.conv(x)
+        res = (prev + block_out)/2
+        return res
+
+
 class Discriminator(nn.Module):
 
     def __init__(self, 
@@ -233,9 +254,26 @@ class Discriminator(nn.Module):
                 conv_module_bn(start_channel_dim, start_channel_dim, 4, 0),
             )
         )
+        self.core_model = to_cuda(self.core_model)
         self.output_layer = WSLinear(start_channel_dim, 1)
         self.transition_value = 1.0
         self.prev_channel_dim = start_channel_dim
+        """
+                self.core_model = nn.Sequential(
+            nn.Sequential(
+                conv_module_bn(start_channel_dim + self.num_poses, start_channel_dim, 1, 0),
+                ResNetBlock(start_channel_dim, 3),
+                conv_module_bn(start_channel_dim, start_channel_dim, 4, 0)
+            )
+        )
+                self.new_block = nn.Sequential(
+            conv_module_bn(input_dim + self.num_poses, input_dim, 1, 0),
+            ResNetBlock(input_dim, 4),
+            conv_module_bn(input_dim, output_dim, 1, 0),
+            nn.AvgPool2d([2, 2])
+        )
+        """
+
 
     def extend(self, input_dim):
         input_dim = int(input_dim * (2**0.5))
