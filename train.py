@@ -483,6 +483,9 @@ class Trainer:
         if self.current_imsize >= 64:
             print("Calculating fid")
             fid_val = fid.calculate_fid(real_images, fake_images, 8)
+            if self.distributed:
+                fid_val = torch.tensor(fid_val, device="cuda:{}".format(self.local_rank))
+                fid_val = reduce_tensor(fid_val, self.world_size).item()
             print("FID:", fid_val)
             self.log_variable("stats/fid", np.mean(fid_val), True)
         self.log_variable('discriminator/wasserstein-distance',
@@ -575,7 +578,7 @@ class Trainer:
                     time.time() - batch_start_time) / self.batch_size
                 self.total_time = (time.time() - self.start_time) / 60
                 # Log data
-
+                self.update_running_average_generator()
                 if i % 50 == 0:
                     if self.distributed:
                         wasserstein_distance = reduce_tensor(wasserstein_distance.data,
@@ -605,7 +608,7 @@ class Trainer:
                         self.log_variable("stats/nsec_per_img", nsec_per_img)
                         self.log_variable(
                             "stats/training_time_minutes", self.total_time)
-                        self.update_running_average_generator()
+                        
                 self.global_step += self.batch_size*self.world_size
                 
                 if (self.global_step) % (self.batch_size*500) == 0:
