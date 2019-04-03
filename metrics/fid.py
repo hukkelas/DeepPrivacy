@@ -50,7 +50,6 @@ from apex import amp
 def get_model():
     model = InceptionV3([block_idx])
     model = to_cuda(model)
-    model = amp.initialize(model, None, opt_level="O1")
     return model
 
 def get_activations(images, model, batch_size=64):

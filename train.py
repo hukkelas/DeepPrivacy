@@ -22,6 +22,13 @@ def isnan(x):
     return x != x
 
 
+def check_overflow(grad):
+    cpu_sum = float(grad.float().sum())
+    if cpu_sum == float("inf") or cpu_sum == -float("inf") or cpu_sum != cpu_sum:
+        return True
+    return False
+
+
 @amp.float_function
 def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks, loss_scaler):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() - 1)
@@ -32,21 +39,20 @@ def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks, 
     x_hat = epsilon * real_data + (1-epsilon) * fake_data.detach()
     x_hat.requires_grad = True
     logits = discriminator(x_hat, condition, landmarks)
-    logits = logits.sum()
-    logits = logits * loss_scaler.loss_scale()
+    logits = logits.sum() * loss_scaler.loss_scale()
     grad = torch.autograd.grad(
         outputs=logits,
         inputs=x_hat,
-        grad_outputs=to_cuda(torch.ones(logits.shape)).to(fake_data.dtype),
+        grad_outputs=torch.ones(logits.shape).to(fake_data.dtype).to(fake_data.device),
         create_graph=True
     )[0] #.view(x_hat.shape[0], -1)
-    if amp.scaler.scale_check_overflow_python(grad, 1/loss_scaler.loss_scale(), grad) or isnan(grad.max()):
+    grad = grad.view(x_hat.shape[0], -1)
+    if check_overflow(grad):
         print("Overflow in gradient penalty calculation.")
         loss_scaler._loss_scale /= 2
         print("Scaling down loss to:", loss_scaler._loss_scale)
         return None
-
-    grad = grad.view(x_hat.shape[0], -1)
+    grad = grad / loss_scaler.loss_scale()
 
     grad_penalty = ((grad.norm(p=2, dim=1) - 1)**2)
     return grad_penalty.to(fake_data.dtype)
@@ -54,14 +60,18 @@ def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks, 
 
 class NetworkWrapper(torch.nn.Module):
 
-    def __init__(self, network, distributed):
+    def __init__(self, network, distributed, local_rank):
         super().__init__()
         self.network = network
         self.distributed = distributed
         if distributed:
             # Does not work with delay_allreduce=False 
             # 
-            self.forward_block = apex.parallel.DistributedDataParallel(self.network, delay_allreduce=True)
+            self.forward_block = torch.nn.parallel.DistributedDataParallel(
+                self.network,
+                device_ids=[local_rank],
+                output_device=local_rank
+            )
         else:
             self.forward_block = self.network
 
@@ -69,7 +79,23 @@ class NetworkWrapper(torch.nn.Module):
         return self.forward_block(*inputs)
 
     def extend(self, channel_size):
-        self.network.extend(channel_size)
+        del self.forward_block
+        if type(self.network) == Discriminator:
+            network = Discriminator(self.network.image_channels,
+                                    4,
+                                    self.network.orig_start_channel_dim,
+                                    self.network.num_poses*2)
+        else:
+            network = Generator(self.network.num_poses*2,
+                                self.network.orig_start_channel_dim,
+                                self.network.image_channels)
+        for c in self.network.extension_channels:
+            network.extend(c)
+        network.load_state_dict(self.network.state_dict())
+        network.extend(channel_size)
+        del self.network
+        self.network = to_cuda(network)
+        
 
     def update_transition_value(self, value):
         self.network.transition_value = value
@@ -95,10 +121,10 @@ def init_model(imsize, pose_size, start_channel_dim, image_channels, distributed
     return discriminator, generator
 
 
-def wrap_models(models, distributed):
+def wrap_models(models, distributed, local_rank):
     if isinstance(models, tuple) or isinstance(models, list):
-        return [to_cuda(NetworkWrapper(x, distributed)) for x in models]
-    return to_cuda(NetworkWrapper(models, distributed))
+        return [to_cuda(NetworkWrapper(x, distributed, local_rank)) for x in models]
+    return to_cuda(NetworkWrapper(models, distributed, local_rank))
 
 
 def save_images(writer, images, global_step, directory):
@@ -360,7 +386,7 @@ class Trainer:
         self.running_average_generator = to_cuda(self.running_average_generator)
         self.running_average_generator = amp.initialize(self.running_average_generator, None, opt_level=self.opt_level)
         self.running_average_generator = NetworkWrapper(
-            self.running_average_generator, self.distributed)
+            self.running_average_generator, self.distributed, self.local_rank)
         self.running_average_generator = to_cuda(
             self.running_average_generator)
 
@@ -372,7 +398,7 @@ class Trainer:
             avg_param.data = cur_param.data
         self.running_average_generator = self.running_average_generator.network
         self.running_average_generator = amp.initialize(self.running_average_generator, None, opt_level=self.opt_level)
-        self.running_average_generator = NetworkWrapper(self.running_average_generator, self.distributed)
+        self.running_average_generator = NetworkWrapper(self.running_average_generator, self.distributed, self.local_rank)
 
     def extend_models(self):
         current_channels = self.transition_channels[self.transition_step]
@@ -410,8 +436,9 @@ class Trainer:
         [self.generator, self.discriminator], [self.g_optimizer, self.d_optimizer] = amp.initialize(
             [self.generator, self.discriminator],
             [self.g_optimizer, self.d_optimizer],
-            opt_level=self.opt_level)
-        self.discriminator, self.generator = wrap_models([self.discriminator, self.generator], self.distributed)
+            opt_level=self.opt_level,
+            num_losses=4)
+        self.discriminator, self.generator = wrap_models([self.discriminator, self.generator], self.distributed, self.local_rank)
 
     def log_variable(self, name, value, log_to_validation=False):
         if self.local_rank == 0:
@@ -559,8 +586,18 @@ class Trainer:
 
                 D_loss = D_loss.mean()
                 self.d_optimizer.zero_grad()
-                with amp.scale_loss(D_loss, self.d_optimizer) as scaled_loss:
+
+                to_backward1 = - wasserstein_distance.mean()
+                with amp.scale_loss(to_backward1, self.d_optimizer, loss_id=0) as scaled_loss:
+                    scaled_loss.backward(retain_graph=True)
+                # Hacky way to solve https://github.com/pytorch/pytorch/issues/13273
+                to_backward2 = gradient_pen.mean() * 10 + 0 * wasserstein_distance.mean()
+                with amp.scale_loss(to_backward2, self.d_optimizer, loss_id=1) as scaled_loss:
+                    scaled_loss.backward(retain_graph=True)
+                to_backward3 = epsilon_penalty.mean() * 0.001
+                with amp.scale_loss(to_backward3, self.d_optimizer, loss_id=2) as scaled_loss:
                     scaled_loss.backward()
+
                 self.d_optimizer.step()
 
                 # Forward G
@@ -570,7 +607,7 @@ class Trainer:
 
                 self.d_optimizer.zero_grad()
                 self.g_optimizer.zero_grad()
-                with amp.scale_loss(G_loss, self.g_optimizer) as scaled_loss:
+                with amp.scale_loss(G_loss, self.g_optimizer, loss_id=3) as scaled_loss:
                     scaled_loss.backward()
                 self.g_optimizer.step()
 
