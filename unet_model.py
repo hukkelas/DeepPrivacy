@@ -248,6 +248,7 @@ class Discriminator(nn.Module):
                  ):
         self.orig_start_channel_dim = start_channel_dim
         start_channel_dim = int(start_channel_dim*(2**0.5))
+        start_channel_dim = start_channel_dim // 8 * 8
         super(Discriminator, self).__init__()
         
         self.num_poses = pose_size // 2

@@ -130,12 +130,14 @@ def load_celeba_condition(batch_size, imsize=128):
 
 
 def load_yfcc100m(batch_size, imsize, distributed):
-    dirpath = os.path.join("data", "yfcc100m_torch3")
+    print("Loading YFCC100M")
+    dirpath = os.path.join("data", "yfcc100m_torch")
     return load_dataset(dirpath, imsize, batch_size, distributed)
 
 
 def load_yfcc100m128(batch_size, imsize, distributed):
-    dirpath = os.path.join("data", "yfcc100m128")
+    print("Loading YFCC100M-128")
+    dirpath = os.path.join("data", "yfcc100m128_torch")
     return load_dataset(dirpath, imsize, batch_size, distributed)
 
 
