@@ -86,6 +86,7 @@ class Generator(nn.Module):
                  image_channels):
         super().__init__()
         # Transition blockss
+        self.orig_start_channel_dim = start_channel_dim
         self.image_channels = image_channels
         self.transition_value = 1.0
         self.num_poses = pose_size // 2
@@ -96,7 +97,11 @@ class Generator(nn.Module):
             to_cuda(UnetDownSamplingBlock(start_channel_dim, start_channel_dim)),
         ])
         self.core_blocks_up = nn.ModuleList([
-            to_cuda(UnetUpsamplingBlock(start_channel_dim+self.num_poses, start_channel_dim))
+            nn.Sequential(
+                conv_bn_relu(start_channel_dim+self.num_poses, start_channel_dim, 1, 0),
+                to_cuda(UnetUpsamplingBlock(start_channel_dim, start_channel_dim))
+            )
+            
         ])
 
         self.new_up = nn.Sequential()
@@ -110,10 +115,12 @@ class Generator(nn.Module):
         self.upsampling = UpSamplingBlock()
         self.prev_channel_size = start_channel_dim
         self.downsampling = nn.AvgPool2d(2)
+        self.extension_channels = []
 
     def extend(self, output_dim):
         print("extending G", output_dim)
         # Downsampling module
+        self.extension_channels.append(output_dim)
         self.current_imsize *= 2
 
         self.from_rgb_old = nn.Sequential(
@@ -151,8 +158,8 @@ class Generator(nn.Module):
             WSConv2d(output_dim, self.image_channels, 1, 0))
 
         self.new_up = to_cuda(nn.Sequential(
-            #conv_bn_relu(self.prev_channel_size*2+self.num_poses, self.prev_channel_size, 1, 0),
-            UnetUpsamplingBlock(self.prev_channel_size*2+self.num_poses, output_dim)
+            conv_bn_relu(self.prev_channel_size*2+self.num_poses, self.prev_channel_size, 1, 0),
+            UnetUpsamplingBlock(self.prev_channel_size, output_dim)
         ))
         self.prev_channel_size = output_dim
 
@@ -239,8 +246,10 @@ class Discriminator(nn.Module):
                  start_channel_dim,
                  pose_size
                  ):
+        self.orig_start_channel_dim = start_channel_dim
         start_channel_dim = int(start_channel_dim*(2**0.5))
         super(Discriminator, self).__init__()
+        
         self.num_poses = pose_size // 2
         self.image_channels = in_channels
         self.current_imsize = 4
@@ -258,6 +267,7 @@ class Discriminator(nn.Module):
         self.output_layer = WSLinear(start_channel_dim, 1)
         self.transition_value = 1.0
         self.prev_channel_dim = start_channel_dim
+        self.extension_channels = []
         """
                 self.core_model = nn.Sequential(
             nn.Sequential(
@@ -276,6 +286,7 @@ class Discriminator(nn.Module):
 
 
     def extend(self, input_dim):
+        self.extension_channels.append(input_dim)
         input_dim = int(input_dim * (2**0.5))
         self.current_imsize *= 2
         output_dim = self.prev_channel_dim
