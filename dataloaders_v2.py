@@ -134,6 +134,11 @@ def load_yfcc100m(batch_size, imsize, distributed):
     return load_dataset(dirpath, imsize, batch_size, distributed)
 
 
+def load_yfcc100m128(batch_size, imsize, distributed):
+    dirpath = os.path.join("data", "yfcc100m128")
+    return load_dataset(dirpath, imsize, batch_size, distributed)
+
+
 def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
     # Data augment width and height by percentage of width.
     # Bounding box will preserve its center.

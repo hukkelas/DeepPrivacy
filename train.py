@@ -8,8 +8,8 @@ from apex import amp
 import torchvision
 import utils
 from utils import load_checkpoint, save_checkpoint, to_cuda
-from unet_model import Generator, Discriminator
-from dataloaders_v2 import load_celeba_condition, load_ffhq_condition, load_yfcc100m
+from unet_model import Generator, Discriminator, DeepDiscriminator
+from dataloaders_v2 import load_celeba_condition, load_ffhq_condition, load_yfcc100m, load_yfcc100m128
 from options import load_options, print_options, DEFAULT_IMSIZE
 from metrics import fid
 import tqdm
@@ -85,6 +85,11 @@ class NetworkWrapper(torch.nn.Module):
                                     4,
                                     self.network.orig_start_channel_dim,
                                     self.network.num_poses*2)
+        elif type(self.network) == DeepDiscriminator:
+            network = DeepDiscriminator(self.network.image_channels,
+                                    4,
+                                    self.network.orig_start_channel_dim,
+                                    self.network.num_poses*2)
         else:
             network = Generator(self.network.num_poses*2,
                                 self.network.orig_start_channel_dim,
@@ -110,8 +115,14 @@ class NetworkWrapper(torch.nn.Module):
         self.network.load_state_dict(dict)
 
 
-def init_model(imsize, pose_size, start_channel_dim, image_channels, distributed):
-    discriminator = Discriminator(image_channels,
+def init_model(imsize, pose_size, start_channel_dim, image_channels, distributed, discriminator_model):
+    if discriminator_model == "deep":
+        d = DeepDiscriminator
+    else:
+        assert discriminator_model == "normal"
+        d = Discriminator
+
+    discriminator = d(image_channels,
                                   imsize,
                                   start_channel_dim,
                                   pose_size)
@@ -149,6 +160,9 @@ def load_dataset(dataset, batch_size, imsize, distributed):
         return load_ffhq_condition(batch_size, imsize)
     if dataset == "yfcc100m":
         return load_yfcc100m(batch_size, imsize, distributed)
+    if dataset == "yfcc100m128":
+        return load_yfcc100m128(batch_size, imsize, distributed)
+    raise AssertionError("Dataset was incorrect", datset)
 
 
 class DataPrefetcher():
@@ -214,6 +228,7 @@ class Trainer:
         self.learning_rate = options.learning_rate
         self.running_average_generator_decay = options.running_average_generator_decay
         self.pose_size = options.pose_size
+        self.discriminator_model = options.discriminator_model
 
         # Image settings
         self.current_imsize = options.imsize
@@ -259,7 +274,8 @@ class Trainer:
                                                             self.pose_size,
                                                             options.start_channel_size,
                                                             self.image_channels,
-                                                            self.distributed)
+                                                            self.distributed,
+                                                            self.discriminator_model)
             self.init_running_average_generator()
             self.extend_models()
             self.init_optimizers()
@@ -306,6 +322,7 @@ class Trainer:
             "latest_switch": self.latest_switch,
             "pose_size": self.pose_size,
             "opt_level": self.opt_level,
+            "discriminator_model": self.discriminator_model
         }
         save_checkpoint(state_dict,
                         filepath,
@@ -326,6 +343,7 @@ class Trainer:
             self.learning_rate = ckpt["learning_rate"]
             self.running_average_generator_decay = ckpt["running_average_generator_decay"]
             self.start_channel_size = ckpt["start_channel_size"]
+            self.discriminator_model = ckpt["discriminator_model"]
             # Image settings
             self.current_imsize = ckpt["current_imsize"]
             self.image_channels = ckpt["image_channels"]
@@ -357,7 +375,8 @@ class Trainer:
                 self.current_imsize // (2**self.transition_step),
                 self.pose_size, current_channels,
                 self.image_channels,
-                self.distributed)
+                self.distributed,
+                self.discriminator_model)
             self.init_running_average_generator()
             num_transitions = self.transition_step
             self.transition_step = 0
@@ -529,6 +548,7 @@ class Trainer:
             save_images(self.validation_writer, fake_images[:64], self.global_step,
                     directory)
         self.discriminator.train()
+        del data_prefetcher
 
     def check_loss_scale(self):
         return
@@ -669,7 +689,7 @@ class Trainer:
                         filepath = os.path.join(self.generated_data_dir, filename)
                         to_save = denormalize_img(condition[:, :3])
                         torchvision.utils.save_image(to_save, filepath, nrow=10)
-                each_step = 4e6 if self.current_imsize == 32 else 2e5
+                each_step = 4e6 if self.current_imsize <= 32 else 2e5
                 if self.global_step//self.batch_size*self.batch_size % (each_step//self.batch_size * self.batch_size) == 0:
                     self.save_checkpoint(epoch)
                     self.validate_model()

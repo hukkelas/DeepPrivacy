@@ -17,6 +17,7 @@ DEFAULT_GENERATOR_RUNNING_AVERAGE_DECAY = 0.999
 DEFAULT_POSE_SIZE = 14
 OPTIONS_DIR = "options"
 DEFAULT_OPT_LEVEL = "O1"
+DEFAULT_DISCRIMINATOR_MODEL = "normal"
 os.makedirs(OPTIONS_DIR, exist_ok=True)
 
 
@@ -107,6 +108,9 @@ def load_options():
                       help="Set the optimization level for APEX",
                       default=DEFAULT_OPT_LEVEL,
                       type=str)
+    parser.add_option("--discriminator-model", dest="discriminator_model",
+                       help="Set the default discriminator architecture",
+                       default=DEFAULT_DISCRIMINATOR_MODEL)
     parser.add_option("--local_rank", default=0, type=int,)
 
     options, _ = parser.parse_args()
