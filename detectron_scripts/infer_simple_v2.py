@@ -140,23 +140,26 @@ assert not cfg.TEST.PRECOMPUTED_PROPOSALS, 'Models that require precomputed prop
 
 model = infer_engine.initialize_model_from_cfg(weights)
 
-def predict_keypoint(impath):
+def predict_keypoint(impath, kp_thresh=0.3):
     im = cv2.imread(impath)
+    max_res = 90000
+    if max(im.shape) > max_res:
+        scale_factor =  max_res / max(im.shape)
+        im = cv2.resize(im, (0,0), fx=scale_factor, fy=scale_factor)
+        
+    else:
+        scale_factor = 1
     with c2_utils.NamedCudaScope(0):
+        print(im.shape)
         cls_boxes, cls_segms, cls_keyps = infer_engine.im_detect_all(
             model, im, None
         )
 
-    #im = im[:,:,::-1]
-    #plt.clf()
-    #plt.imshow(im)
-    keypoints = extract_keypoints(im, "lol", cls_boxes, cls_segms, cls_keyps)
-    #for kp in keypoints:
-    #    X = kp[0, :]
-    #    Y = kp[1, :]
-    #    plt.plot(X, Y, ".")
-    #plt.savefig("test.jpg")
-    return np.array(keypoints)
+    keypoints = extract_keypoints(im, "lol", cls_boxes, cls_segms, cls_keyps, thresh=kp_thresh)
+    if keypoints is None: return []
+    keypoints = np.array(keypoints)
+    #keypoints /= scale_factor
+    return keypoints
 
 
 from matplotlib.patches import Polygon
@@ -172,7 +175,7 @@ keypoint indices:
 'left_shoulder',
 """
 def extract_keypoints(
-        im, output_dir, boxes, segms=None, keypoints=None, thresh=0.9,
+        im, output_dir, boxes, segms=None, keypoints=None, thresh=0.3,
         kp_thresh=2, dpi=200, box_alpha=0.0, dataset=None, show_class=False,
         ext='pdf', out_when_no_box=False):
 

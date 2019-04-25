@@ -1,9 +1,28 @@
 import sys
 from unet_model import Generator
-from train import DataParallellWrapper
+from train import NetworkWrapper
 from utils import to_cuda, init_model
 import numpy as np
 import matplotlib.pyplot as plt
+from options import print_options
+import cv2
+def draw_bboxes(image, bboxes, colors):
+    image = image.copy()
+    for bbox in bboxes:
+        x0, y0, x1, y1 = bbox
+        image = cv2.rectangle(image, (x0, y0), (x1, y1),colors, 1)
+    return image
+
+
+def draw_keypoints(image, keypoints, colors):
+    image = image.copy()
+    for keypoint in keypoints:
+        X = keypoint[0, :3]
+        Y = keypoint[1, :3]
+        for x, y in zip(X, Y):
+            cv2.circle(image, (x, y), 2, colors)
+    return image
+
 
 def image_to_numpy(images):
     single_image = False
@@ -25,14 +44,14 @@ def init_generator(checkpoint):
     transition_step = checkpoint["transition_step"]
     transition_value = checkpoint["transition_variable"]
     g = Generator(pose_dim, start_channel_size, image_channels)
-    g = DataParallellWrapper(g)
     init_model(start_channel_size, transition_step, g)
     g = to_cuda(g)
     g.load_state_dict(checkpoint["running_average_generator"])
-    g.update_transition_value(transition_value)
+    g.transition_value = transition_value
     print("Transition step:", transition_step)
     print("Transition value:", transition_value)
     print("Global step:", checkpoint["global_step"])
+    print_options(checkpoint)
     return g
 
 

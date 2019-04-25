@@ -273,6 +273,7 @@ class Discriminator(nn.Module):
     def extend(self, input_dim):
         self.extension_channels.append(input_dim)
         input_dim = int(input_dim * (2**0.5))
+        input_dim = input_dim//8 * 8 
         self.current_imsize *= 2
         output_dim = self.prev_channel_dim
         if not self.current_imsize == 8:

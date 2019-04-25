@@ -3,6 +3,10 @@ import json
 
 
 def quadratic_bounding_box(x0, y0, width, height, imshape):
+    # We assume that we can create a image that is quadratic without 
+    # minimizing any of the sides
+    assert width <= min(imshape[:2])
+    assert height <= min(imshape[:2])
     min_side = min(height, width)
     if height != width:
         side_diff = abs(height-width)
@@ -52,44 +56,63 @@ def quadratic_bounding_box(x0, y0, width, height, imshape):
 
 
 def expand_bounding_box(x0, y0, x1, y1, percentage, imshape):
-    width = x1 - x0 
+    x0_o = x0
+    y0_o = y0
+    x1_o = x1
+    y1_o = y1
+    width = x1 - x0
     height = y1 - y0
     x0, y0, width, height = quadratic_bounding_box(x0, y0, width, height, imshape)
+    
     expanding_factor = int(max(height, width) * percentage)
+
     possible_max_expansion = [(imshape[0] - width)//2,
                               (imshape[1] - height)//2,
                               expanding_factor]
+
     expanding_factor = min(possible_max_expansion)
     # Expand height
-    y0 = y0 - expanding_factor
-    y0 = max(0, y0)
 
-    height += expanding_factor*2
-    if height > imshape[0]:
-        y0 -= (imshape[0] - height)
-        height = imshape[0]
+    if expanding_factor > 0:
 
-    if height + y0 > imshape[0]:
-        y0 -= (height + y0 - imshape[0])
+        y0 = y0 - expanding_factor
+        y0 = max(0, y0)
 
+        height += expanding_factor*2
+        if height > imshape[0]:
+            y0 -= (imshape[0] - height)
+            height = imshape[0]
+
+        if height + y0 > imshape[0]:
+            y0 -= (height + y0 - imshape[0])
+
+        
+        # Expand width
+        x0 = x0 - expanding_factor
+        x0 = max(0, x0)
+
+        width += expanding_factor*2
+        if width > imshape[1]:
+            x0 -= (imshape[1] - width)
+            width = imshape[1]
+
+        if width + x0 > imshape[1]:
+            x0 -= (width + x0 - imshape[1])
+    y1 = y0 + height
+    x1 = x0 + width
     assert y0 >= 0, "Y0 is minus"
     assert height <= imshape[0], "Height is larger than image."
-    # Expand width
-    x0 = x0 - expanding_factor
-    x0 = max(0, x0)
-
-    width += expanding_factor*2
-    if width > imshape[1]:
-        x0 -= (imshape[1] - width)
-        width = imshape[1]
-
-    if width + x0 > imshape[1]:
-        x0 -= (width + x0 - imshape[1])
     assert x0 + width <= imshape[1]
     assert y0 + height <= imshape[0]
     assert width == height, "HEIGHT IS NOT EQUAL WIDTH!!"
     assert x0 >= 0, "Y0 is minus"
     assert width <= imshape[1], "Height is larger than image."
+    # Check that original bbox is within new
+
+    assert x0 <= x0_o, "New bbox is outisde of original. O:{}, N: {}".format(x0_o, x0 )
+    assert x1 >= x1_o, "New bbox is outisde of original. O:{}, N: {}".format(x1_o, x1)
+    assert y0 <= y0_o, "New bbox is outisde of original. O:{}, N: {}".format(y0_o, y0)
+    assert y1 >= y1_o, "New bbox is outisde of original. O:{}, N: {}".format(y1_o, y1)
     #x0, y0, width, height = quadratic_bounding_box(x0, y0, width, height, imshape)
     return x0, y0, width, height
 

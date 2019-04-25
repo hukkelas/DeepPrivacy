@@ -164,6 +164,10 @@ def load_dataset(dataset, batch_size, imsize, distributed):
         return load_yfcc100m128(batch_size, imsize, distributed)
     raise AssertionError("Dataset was incorrect", datset)
 
+def preprocess_images(image, transition_variable, pool=torch.nn.AvgPool2d(2, 2)):
+    image = image * 2 - 1
+    image = interpolate_image(pool, image, transition_variable)
+    return image
 
 class DataPrefetcher():
 
