@@ -47,8 +47,17 @@ pose_indexes = {
 
 }
 
+
 def generate_pose_channel_images(min_imsize, max_imsize, device, pose_information, dtype):
     batch_size = pose_information.shape[0]
+    if pose_information.shape[1] == 1:
+        pose_images = []
+        imsize = min_imsize
+        while imsize <= max_imsize:
+            new_im = torch.zeros((batch_size, 1, imsize, imsize), dtype=dtype, device=device)
+            imsize *= 2
+            pose_images.append(new_im)
+        return pose_images
     num_poses = pose_information.shape[1] // 2
     pose_x = pose_information[:, range(0, pose_information.shape[1], 2)].view(-1)
     pose_y = pose_information[:, range(1, pose_information.shape[1], 2)].view(-1)
@@ -223,11 +232,7 @@ class ResNetBlock(nn.Module):
         blocks = []
         for i in range(num_conv):
             blocks.append(
-                nn.Sequential(
-                    PixelwiseNormalization(),
-                    nn.LeakyReLU(negative_slope=.2),
-                    WSConv2d(num_channels, num_channels, 3, 1)
-                )
+           conv_module_bn(num_channels, num_channels, 3, 1)
             )
         self.conv = nn.Sequential(*blocks)
 
@@ -273,6 +278,7 @@ class Discriminator(nn.Module):
     def extend(self, input_dim):
         self.extension_channels.append(input_dim)
         input_dim = int(input_dim * (2**0.5))
+        # input_dim = input_dim // 8 * 8
         self.current_imsize *= 2
         output_dim = self.prev_channel_dim
         if not self.current_imsize == 8:

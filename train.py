@@ -162,7 +162,7 @@ def load_dataset(dataset, batch_size, imsize, distributed):
         return load_yfcc100m(batch_size, imsize, distributed)
     if dataset == "yfcc100m128":
         return load_yfcc100m128(batch_size, imsize, distributed)
-    raise AssertionError("Dataset was incorrect", datset)
+    raise AssertionError("Dataset was incorrect", dataset)
 
 
 class DataPrefetcher():
