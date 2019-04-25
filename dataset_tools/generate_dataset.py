@@ -24,7 +24,7 @@ BBOX_PATH = "/lhome/haakohu/flickr_download/annotations.json"
 BBOX_JSON = read_json(BBOX_PATH)
 LANDMARKS_JSON = read_json(LANDMARKS_PATH)
 BBOX_EXPANSION_FACTOR = 0.35
-MIN_BBOX_SIZE = 64
+MIN_BBOX_SIZE = 128
 TARGET_IMSIZES = [4, 8, 16, 32, 64, 128]
 
 
@@ -138,7 +138,7 @@ def extract_and_save_image_batch(impaths, image_annotations, batch_idx):
     images = []
     for impath in impaths:
         images.append(np.array(Image.open(impath)))
-        plt.imsave(os.path.join("lol", os.path.basename(impath)), plt.imread(impath))
+        #plt.imsave(os.path.join("lol", os.path.basename(impath)), plt.imread(impath))
     extracted_faces = []
     for image, annotations in zip(images, image_annotations):
         for annotation in annotations:
@@ -210,7 +210,7 @@ def main():
     extract_annotations_and_save(image_annotations)
     total_images = [len(x) for x in image_annotations]
     print("Total number of images:", sum(total_images))
-    num_jobs = 200
+    num_jobs = 20000
     batch_size = math.ceil(len(impaths) / num_jobs)
     with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
         jobs = []
