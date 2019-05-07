@@ -7,7 +7,7 @@ import torch
 from apex import amp
 import torchvision
 import utils
-from utils import load_checkpoint, save_checkpoint, to_cuda
+from utils import load_checkpoint, save_checkpoint, to_cuda, reduce_tensor, amp_state_has_overflow, is_distributed, gather_tensor
 from unet_model import Generator, Discriminator, DeepDiscriminator
 from dataloaders_v2 import load_celeba_condition, load_ffhq_condition, load_yfcc100m, load_yfcc100m128
 from options import load_options, print_options, DEFAULT_IMSIZE
@@ -15,7 +15,15 @@ from metrics import fid
 import tqdm
 import apex
 
-torch.backends.cudnn.benchmark = True
+if False:
+    torch.manual_seed(0)
+    np.random.seed(0)
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = True
+    torch.set_printoptions(precision=10)
+else:
+
+    torch.backends.cudnn.benchmark = True
 
 
 def isnan(x):
@@ -209,7 +217,7 @@ class DataPrefetcher():
         next_condition = self.next_condition
         next_landmark = self.next_landmark
         self.preload(transition_variable)
-        return next_image, next_condition, next_landmark
+        return next_image, next_condition, next_landmark#[:, :1]
 
 
 def interpolate_image(pool, images, transition_variable):
@@ -270,9 +278,11 @@ class Trainer:
         ]
         self.start_time = time.time()
         if self.local_rank == 0:
-            self.writer = tensorboardX.SummaryWriter(options.summaries_dir)
+            self.writer = tensorboardX.SummaryWriter(
+                os.path.join(options.summaries_dir, "train")
+            )
             self.validation_writer = tensorboardX.SummaryWriter(
-                os.path.join(options.summaries_dir, "validation"))
+                os.path.join(options.summaries_dir, "val"))
         if not self.load_checkpoint():
             self.discriminator, self.generator = init_model(options.imsize,
                                                             self.pose_size,
@@ -432,7 +442,7 @@ class Trainer:
         self.current_imsize *= 2
 
         self.batch_size = self.batch_size_schedule[self.current_imsize] // self.world_size
-        self.log_variable("stats/batch_size", self.batch_size)
+        
         self.transition_step += 1
 
     def update_running_average_generator(self):
@@ -554,13 +564,12 @@ class Trainer:
         self.discriminator.train()
         del data_prefetcher
 
-    def check_loss_scale(self):
-        return
-        for optimizer in [self.d_optimizer, self.g_optimizer]:
-            if optimizer.loss_scaler._loss_scale == 0:
-                optimizer.loss_scaler._loss_scale = 2**15
-                print("Loss scale was too small. Scaled back to 1. Step:", self.prev_step, "Current step:", self.global_step)
-                self.prev_step = self.global_step
+    def log_loss_scales(self):
+        if self.local_rank != 0:
+            return
+        for loss_idx, loss_scaler in enumerate(amp._amp_state.loss_scalers):
+            self.log_variable("amp/loss_scale_{}".format(loss_idx), loss_scaler._loss_scale)
+        
 
     def train(self):
         for epoch in range(self.start_epoch, int(1e16)):
@@ -568,7 +577,6 @@ class Trainer:
             for i in range(len(self.dataloader_train)):
                 batch_start_time = time.time()
                 self.generator.train()
-                self.check_loss_scale()
                 if self.is_transitioning:
                     self.transition_variable = (
                         (self.global_step-1) % self.transition_iters) / self.transition_iters
@@ -578,8 +586,8 @@ class Trainer:
                         self.transition_variable)
                     self.running_average_generator.update_transition_value(
                         self.transition_variable)
+                
                 real_data, condition, landmarks = prefetcher.next(self.transition_variable)
-                torchvision.utils.save_image(denormalize_img(real_data), "test.jpg", nrow=10)
                 # Forward G
                 fake_data = self.generator(condition, landmarks)
                 # Train Discriminator
@@ -650,8 +658,8 @@ class Trainer:
                         fake_scores = reduce_tensor(fake_scores.data, self.world_size)
                         epsilon_penalty = reduce_tensor(epsilon_penalty.data, self.world_size)
                     torch.cuda.synchronize()
-                    if self.local_rank == 0:
-                        
+                    self.log_loss_scales()
+                    if self.local_rank == 0 and not amp_state_has_overflow():
                         self.log_variable(
                             'discriminator/wasserstein-distance',
                             wasserstein_distance.mean().item())
@@ -669,6 +677,7 @@ class Trainer:
                         self.log_variable("stats/nsec_per_img", nsec_per_img)
                         self.log_variable(
                             "stats/training_time_minutes", self.total_time)
+                    
                         
                 self.global_step += self.batch_size*self.world_size
                 
@@ -727,19 +736,13 @@ class Trainer:
                         # Save image after transition
                         self.save_transition_image(False)
                         self.save_checkpoint(epoch)
+                        self.log_variable("stats/batch_size", self.batch_size)
+                        self.log_variable("stats/learning_rate", self.learning_rate)
 
                         break
             self.save_checkpoint(epoch)
 
-
-def reduce_tensor(tensor, world_size):
-    rt = tensor.clone()
-    torch.distributed.all_reduce(rt, op=torch.distributed.ReduceOp.SUM)
-    rt /= world_size
-    return rt
-
 if __name__ == '__main__':
     options = load_options()
-
     trainer = Trainer(options)
     trainer.train()

@@ -4,6 +4,7 @@ import utils
 import glob
 import numpy as np
 from torchvision import transforms
+from data_sampelrs import ValidationSampler, TrainSampler
 
 
 class DeepPrivacyDataset(torch.utils.data.Dataset):
@@ -91,7 +92,7 @@ def load_dataset(dirpath, imsize, batch_size, distributed):
     assert os.path.isfile(
         landmark_filepath), "Did not find the landmark data. Looked in: {}".format(landmark_filepath)
     landmarks = torch.load(landmark_filepath).float() / imsize
-    validation_size = int(0.02*len(images))
+    validation_size = 10000#int(0.02*len(images))
     images_train, images_val = images[:-validation_size], images[-validation_size:]
     bbox_train, bbox_val = bounding_boxes[:-validation_size], bounding_boxes[-validation_size:]
     lm_train, lm_val = landmarks[:-validation_size], landmarks[-validation_size:]
@@ -99,15 +100,13 @@ def load_dataset(dirpath, imsize, batch_size, distributed):
     dataset_train = DeepPrivacyDataset(images_train, bbox_train, lm_train, True)
     dataset_val = DeepPrivacyDataset(images_val, bbox_val, lm_val, False)
     print("LEN DATASET VAL:", len(dataset_val), len(images_val))
-
-    train_sampler, val_sampler = None, None
-    if distributed:
-        train_sampler = torch.utils.data.DistributedSampler(dataset_train)
-        val_sampler = torch.utils.data.DistributedSampler(dataset_val)
+   
+    train_sampler = TrainSampler(dataset_train)
+    val_sampler = ValidationSampler(dataset_val)
     
     dataloader_train = torch.utils.data.DataLoader(dataset_train,
                                                    batch_size=batch_size,
-                                                   shuffle=(train_sampler is None),
+                                                   shuffle=train_sampler is None,
                                                    sampler=train_sampler,
                                                    num_workers=8,
                                                    drop_last=True,

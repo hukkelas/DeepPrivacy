@@ -1,7 +1,7 @@
 import os
 import shutil
 import torch
-
+from apex.amp import _amp_state
 
 def to_cuda(elements):
     if torch.cuda.is_available():
@@ -98,7 +98,7 @@ def _rampdown_linear(epoch, num_epochs, rampdown_length):
 
 def get_transition_value(x_old, x_new, transition_variable):
     assert x_old.shape == x_new.shape
-    return (1-transition_variable) * x_old + transition_variable*x_new
+    return torch.lerp(x_old, x_new, transition_variable)
 
 
 def init_model(start_channel_size, num_levels, model):
@@ -119,3 +119,29 @@ def init_model(start_channel_size, num_levels, model):
 def truncated_normal(mean, std, size):
     normal = torch.zeros(size).normal_(mean=mean, std=std)
     return normal
+
+
+
+def gather_tensor(tensor):
+    to_return = [torch.zeros_like(tensor, device=tensor.device) for i in range(torch.distributed.get_world_size())]
+    torch.distributed.all_gather_multigpu(to_return, tensor)
+    return torch.cat(to_return, dim=0)
+
+def reduce_tensor(tensor, world_size=None):
+    rt = tensor.clone()
+    torch.distributed.all_reduce(rt, op=torch.distributed.ReduceOp.SUM)
+    rt /= world_size
+    return rt
+
+
+def is_distributed():
+    a = torch.distributed.is_available()
+    b = torch.distributed.is_initialized()
+    return a and b and torch.distributed.get_world_size() > 1
+
+
+def amp_state_has_overflow():
+    for loss_scaler in _amp_state.loss_scalers:
+        if loss_scaler._has_overflow:
+            return True
+    return False

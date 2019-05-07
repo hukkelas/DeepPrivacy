@@ -25,7 +25,7 @@ def validate_start_channel_size(max_imsize, start_channel_size):
     # Assert start channel size is valid with the max imsize
     # Number of times to double
     n_image_double =  math.log(max_imsize, 2) - 2 # starts at 4
-    n_channel_halving = math.log(start_channel_size, 2)
+    n_channel_halving = math.log(start_channel_size, 2) + 2
     assert n_image_double < n_channel_halving
 
 
@@ -41,15 +41,6 @@ def print_options(dic):
             continue
         print("{:<16} {}".format(key, item))
     print("="*80)
-
-
-def write_options(options, name):
-    if options["local_rank"] != 0:
-        return
-    path = os.path.join(OPTIONS_DIR, name, "options.json")
-    os.makedirs(os.path.join(OPTIONS_DIR, name), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(options, f)
 
 
 def check_distributed(options):
@@ -120,11 +111,6 @@ def load_options():
     options.checkpoint_dir = os.path.join("checkpoints", options.model_name)
     options.generated_data_dir = os.path.join("generated_data", options.model_name)
     options.summaries_dir = os.path.join("summaries", options.model_name)
-    if os.path.isdir(options.summaries_dir):
-        num_folders = len(os.listdir(options.summaries_dir))
-        options.summaries_dir = os.path.join(options.summaries_dir, str(num_folders))
-    else:
-        options.summaries_dir = os.path.join(options.summaries_dir, str(0))
     os.makedirs(options.checkpoint_dir, exist_ok=True)
     os.makedirs(options.generated_data_dir, exist_ok=True)
 
@@ -136,7 +122,6 @@ def load_options():
     assert options.opt_level in ["O1","O0"], "Optimization level not correct. It was: {}".format(options.opt_level)
 
     print_options(vars(options))
-    write_options(vars(options), options.model_name)
     check_distributed(options)
     return options
 

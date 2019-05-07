@@ -15,12 +15,13 @@ model_index = sys.argv.index("--model")
 model_name = sys.argv[model_index+1]
 docker_container = "haakohu_{}".format(model_name)
 print("docker container name:", docker_container)
+os.system("docker rm {}".format(docker_container))
 
 distributed_command = "" if num_gpus <= 1 else "-m torch.distributed.launch --nproc_per_node {}".format(num_gpus)
 command = "nvidia-docker run --name {} \
         -v /dev/log:/home/haakohu/DeepPrivacy/log -u 1174424 -v {}:/workspace -v /raid/userdata/haakohu/deep_privacy/data:/workspace/data \
            -e CUDA_VISIBLE_DEVICES={}  --log-opt max-size=50m\
-           haakohu/pytorch_beta python {} train.py {}".format(
+           haakohu/pytorch python {} train.py {}".format(
             docker_container,
             filedir,
             gpu_id,

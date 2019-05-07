@@ -42,7 +42,7 @@ from scipy.misc import imread
 from scipy import linalg
 from torch.autograd import Variable
 from torch.nn.functional import adaptive_avg_pool2d
-from utils import to_cuda
+from utils import to_cuda, is_distributed, gather_tensor
 from metrics.inception import InceptionV3
 dims=2048
 block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
@@ -81,7 +81,10 @@ def get_activations(images, model, batch_size=64):
 
     n_batches = d0 // batch_size
     n_used_imgs = n_batches * batch_size
-    pred_arr = np.zeros((n_used_imgs, dims))
+    if is_distributed():
+        pred_arr = np.zeros((n_used_imgs*torch.distributed.get_world_size(), dims))
+    else:
+        pred_arr = np.zeros((n_used_imgs, dims))
 
     for i in range(n_batches):
 
@@ -97,9 +100,13 @@ def get_activations(images, model, batch_size=64):
         # This happens if you choose a dimensionality not equal 2048.
         if pred.shape[2] != 1 or pred.shape[3] != 1:
             pred = adaptive_avg_pool2d(pred, output_size=(1, 1))
-
-        pred_arr[start:end] = pred.cpu().data.numpy().reshape(batch_size, -1)
-
+        if is_distributed():
+            pred = gather_tensor(pred).reshape(batch_size*torch.distributed.get_world_size(), -1)
+            start = i * batch_size * torch.distributed.get_world_size()
+            end = start + batch_size * torch.distributed.get_world_size()
+        else:
+            pred = pred.reshape(batch_size, -1)
+        pred_arr[start:end] = pred.cpu().data.numpy()
     return pred_arr
 
 
@@ -192,7 +199,7 @@ def calculate_fid(images1, images2, batch_size):
     assert images2.max() <= 1
     assert images2.max() >= 0
     model = get_model()
-    #model = to_cuda(model)
+    model = to_cuda(model)
     m1, s1 = calculate_activation_statistics(images1, model, batch_size)
     m2, s2 = calculate_activation_statistics(images2, model, batch_size)
     del model
