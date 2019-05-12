@@ -26,15 +26,15 @@ class DeepPrivacyDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         im = self.images[index]
         im = transforms.functional.to_pil_image(im)
-        landmarks = self.landmarks[index]
-        bbox = self.bounding_boxes[index]
+        landmarks = self.landmarks[index].clone()
+        bbox = self.bounding_boxes[index].clone()
         if self.augment_data:
-            bbox = bounding_box_data_augmentation(bbox, self.imsize, 0.2)
+            bbox = bounding_box_data_augmentation(bbox, self.imsize, 0.02)
             
             if np.random.rand() > 0.5:
                 im = transforms.functional.hflip(im)
-                x = landmarks[range(landmarks.shape[0], 2)]
-                landmarks[range(landmarks.shape[0], 2)] = 1 - x
+                x = landmarks[range(0, landmarks.shape[0], 2)]
+                landmarks[range(0, landmarks.shape[0], 2)] = 1 - x
                 bbox[[0, 2]] = self.imsize - bbox[[2, 0]]
         im = np.asarray(im)
         condition = im.copy()
@@ -93,9 +93,10 @@ def load_dataset(dirpath, imsize, batch_size, distributed):
         landmark_filepath), "Did not find the landmark data. Looked in: {}".format(landmark_filepath)
     landmarks = torch.load(landmark_filepath).float() / imsize
     validation_size = 10000#int(0.02*len(images))
-    images_train, images_val = images[:-validation_size], images[-validation_size:]
-    bbox_train, bbox_val = bounding_boxes[:-validation_size], bounding_boxes[-validation_size:]
-    lm_train, lm_val = landmarks[:-validation_size], landmarks[-validation_size:]
+    # Keep out 50,000 images for final validation.
+    images_train, images_val = images[:-50000], images[-validation_size:]
+    bbox_train, bbox_val = bounding_boxes[:-50000], bounding_boxes[-validation_size:]
+    lm_train, lm_val = landmarks[:-50000], landmarks[-validation_size:]
 
     dataset_train = DeepPrivacyDataset(images_train, bbox_train, lm_train, True)
     dataset_val = DeepPrivacyDataset(images_val, bbox_val, lm_val, False)

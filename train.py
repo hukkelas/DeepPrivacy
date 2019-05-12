@@ -569,13 +569,70 @@ class Trainer:
             return
         for loss_idx, loss_scaler in enumerate(amp._amp_state.loss_scalers):
             self.log_variable("amp/loss_scale_{}".format(loss_idx), loss_scaler._loss_scale)
-        
+    
+    def train_step(self, real_data, condition, landmarks):
+        fake_data = self.generator(condition, landmarks)
+        # Train Discriminator
+        real_scores = self.discriminator(
+            real_data, condition, landmarks)
+        fake_scores = self.discriminator(
+            fake_data.detach(), condition, landmarks)
+        # Wasserstein-1 Distance
+        wasserstein_distance = (real_scores - fake_scores).squeeze()
+        gradient_pen = gradient_penalty(
+            real_data.data, fake_data.detach(), self.discriminator,
+            condition, landmarks, self.wgan_gp_scaler)
+        if self.distributed:
+            should_skip = torch.tensor(gradient_pen is None, device=fake_data.device)
+            torch.distributed.all_reduce(should_skip,
+                                         op=torch.distributed.ReduceOp.SUM)
+            should_skip = should_skip.item() != 0
+        else:
+            should_skip = gradient_pen is None
+        if should_skip:
+            return None
+        # Epsilon penalty
+        epsilon_penalty = (real_scores ** 2).squeeze()
+        assert epsilon_penalty.shape == gradient_pen.shape
+        assert wasserstein_distance.shape == epsilon_penalty.shape
+        D_loss = - wasserstein_distance
+        D_loss += gradient_pen * 10 + epsilon_penalty * 0.001
+
+        D_loss = D_loss.mean()
+        self.d_optimizer.zero_grad()
+
+        to_backward1 = - wasserstein_distance.mean()
+        with amp.scale_loss(to_backward1, self.d_optimizer, loss_id=0) as scaled_loss:
+            scaled_loss.backward(retain_graph=True)
+        # Hacky way to solve https://github.com/pytorch/pytorch/issues/13273
+        to_backward2 = gradient_pen.mean() * 10 + 0 * wasserstein_distance.mean()
+        with amp.scale_loss(to_backward2, self.d_optimizer, loss_id=1) as scaled_loss:
+            scaled_loss.backward(retain_graph=True)
+        to_backward3 = epsilon_penalty.mean() * 0.005
+        with amp.scale_loss(to_backward3, self.d_optimizer, loss_id=2) as scaled_loss:
+            scaled_loss.backward()
+
+        self.d_optimizer.step()
+
+        # Forward G
+        fake_scores = self.discriminator(
+            fake_data, condition, landmarks)
+        G_loss = (-fake_scores).mean()
+
+        self.d_optimizer.zero_grad()
+        self.g_optimizer.zero_grad()
+        with amp.scale_loss(G_loss, self.g_optimizer, loss_id=3) as scaled_loss:
+            scaled_loss.backward()
+        self.g_optimizer.step()
+        return wasserstein_distance.mean().detach(), gradient_pen.mean().detach(), real_scores.mean().detach(), fake_scores.mean().detach(), epsilon_penalty.mean().detach()
 
     def train(self):
         for epoch in range(self.start_epoch, int(1e16)):
             prefetcher = DataPrefetcher(self.dataloader_train, self.transition_variable)
             for i in range(len(self.dataloader_train)):
                 batch_start_time = time.time()
+                self.d_optimizer.zero_grad()
+                self.g_optimizer.zero_grad()
                 self.generator.train()
                 if self.is_transitioning:
                     self.transition_variable = (
@@ -589,60 +646,12 @@ class Trainer:
                 
                 real_data, condition, landmarks = prefetcher.next(self.transition_variable)
                 # Forward G
-                fake_data = self.generator(condition, landmarks)
-                # Train Discriminator
-                real_scores = self.discriminator(
-                    real_data, condition, landmarks)
-                fake_scores = self.discriminator(
-                    fake_data.detach(), condition, landmarks)
-                # Wasserstein-1 Distance
-                wasserstein_distance = (real_scores - fake_scores).squeeze()
-                gradient_pen = gradient_penalty(
-                    real_data.data, fake_data.detach(), self.discriminator,
-                    condition, landmarks, self.wgan_gp_scaler)
-                if self.distributed:
-                    should_skip = torch.tensor(gradient_pen is None, device=fake_data.device)
-                    torch.distributed.all_reduce(should_skip,
-                                                 op=torch.distributed.ReduceOp.SUM)
-                    should_skip = should_skip.item() != 0
-                else:
-                    should_skip = gradient_pen is None 
-                if should_skip:
+                res = self.train_step(real_data,
+                                      condition,
+                                      landmarks)
+                if res is None:
                     continue
-                # Epsilon penalty
-                epsilon_penalty = (real_scores ** 2).squeeze()
-                assert epsilon_penalty.shape == gradient_pen.shape
-                assert wasserstein_distance.shape == epsilon_penalty.shape
-                D_loss = - wasserstein_distance
-                D_loss += gradient_pen * 10 + epsilon_penalty * 0.001
-
-                D_loss = D_loss.mean()
-                self.d_optimizer.zero_grad()
-
-                to_backward1 = - wasserstein_distance.mean()
-                with amp.scale_loss(to_backward1, self.d_optimizer, loss_id=0) as scaled_loss:
-                    scaled_loss.backward(retain_graph=True)
-                # Hacky way to solve https://github.com/pytorch/pytorch/issues/13273
-                to_backward2 = gradient_pen.mean() * 10 + 0 * wasserstein_distance.mean()
-                with amp.scale_loss(to_backward2, self.d_optimizer, loss_id=1) as scaled_loss:
-                    scaled_loss.backward(retain_graph=True)
-                to_backward3 = epsilon_penalty.mean() * 0.001
-                with amp.scale_loss(to_backward3, self.d_optimizer, loss_id=2) as scaled_loss:
-                    scaled_loss.backward()
-
-                self.d_optimizer.step()
-
-                # Forward G
-                fake_scores = self.discriminator(
-                    fake_data, condition, landmarks)
-                G_loss = (-fake_scores).mean()
-
-                self.d_optimizer.zero_grad()
-                self.g_optimizer.zero_grad()
-                with amp.scale_loss(G_loss, self.g_optimizer, loss_id=3) as scaled_loss:
-                    scaled_loss.backward()
-                self.g_optimizer.step()
-
+                wasserstein_distance, gradient_pen, real_scores, fake_scores, epsilon_penalty = res
                 nsec_per_img = (
                     time.time() - batch_start_time) / self.batch_size
                 self.total_time = (time.time() - self.start_time) / 60

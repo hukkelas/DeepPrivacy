@@ -1,5 +1,6 @@
 import sys
 import shutil
+import os 
 names = sys.argv[1:]
 print(names)
 answer = input("Are you sure you want to delete model \"{}\"?".format(names)).strip()
@@ -19,3 +20,5 @@ for name in names:
         except FileNotFoundError:
             print("Folder already removed:", folder)
         print("Removed:", folder)
+
+    print(os.system("docker rm haakohu_{}".format(name)))

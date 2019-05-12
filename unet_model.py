@@ -178,6 +178,8 @@ class Generator(nn.Module):
         return new_paramters
 
     def forward(self, x_in, pose_info):
+        #z = torch.randn(x_in.shape[0], 1, *x_in.shape[2:], device=x_in.device, dtype=x_in.dtype)
+        #x_in = torch.cat((x_in, z), dim=1)
         unet_skips = []
         if self.current_imsize != 4:
             old_down = self.from_rgb_old(x_in)
