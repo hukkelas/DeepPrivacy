@@ -7,6 +7,24 @@ from torchvision import transforms
 from data_sampelrs import ValidationSampler, TrainSampler
 
 
+
+def load_dataset(dataset, batch_size, imsize, distributed):
+    if dataset == "celeba":
+        raise NotImplementedError
+    if dataset == "ffhq":
+        raise NotImplementedError
+    if dataset == "yfcc100m":
+        dirpath = os.path.join("data", "yfcc100m_torch")
+        return load_dataset(dirpath, imsize, batch_size, distributed)
+    if dataset == "yfcc100m128":
+        dirpath = os.path.join("data", "yfcc100m128_torch")
+        return load_dataset(dirpath, imsize, batch_size, distributed)
+    if dataset == "yfcc100m128v2"
+        dirpath = os.path.join("data", "yfcc100m128_torch_v2")
+        return load_dataset(dirpath, imsize, batch_size, distributed)
+    raise AssertionError("Dataset was incorrect", dataset)
+
+
 class DeepPrivacyDataset(torch.utils.data.Dataset):
 
     def __init__(self, images, bounding_boxes, landmarks, augment_data):
@@ -123,22 +141,6 @@ def load_dataset(dirpath, imsize, batch_size, distributed):
                                                  collate_fn=fast_collate)
     return dataloader_train, dataloader_val
 
-
-def load_celeba_condition(batch_size, imsize=128):
-    dirpath = os.path.join("data", "celeba_numpy")
-    return load_dataset(dirpath, imsize, batch_size)
-
-
-def load_yfcc100m(batch_size, imsize, distributed):
-    print("Loading YFCC100M")
-    dirpath = os.path.join("data", "yfcc100m_torch")
-    return load_dataset(dirpath, imsize, batch_size, distributed)
-
-
-def load_yfcc100m128(batch_size, imsize, distributed):
-    print("Loading YFCC100M-128")
-    dirpath = os.path.join("data", "yfcc100m128_torch")
-    return load_dataset(dirpath, imsize, batch_size, distributed)
 
 
 def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):

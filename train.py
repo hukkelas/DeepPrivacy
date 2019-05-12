@@ -9,7 +9,7 @@ import torchvision
 import utils
 from utils import load_checkpoint, save_checkpoint, to_cuda, reduce_tensor, amp_state_has_overflow, is_distributed, gather_tensor
 from unet_model import Generator, Discriminator, DeepDiscriminator
-from dataloaders_v2 import load_celeba_condition, load_ffhq_condition, load_yfcc100m, load_yfcc100m128
+from dataloaders_v2 import load_dataset
 from options import load_options, print_options, DEFAULT_IMSIZE
 from metrics import fid
 import tqdm
@@ -159,18 +159,6 @@ def denormalize_img(image):
     image = (image+1)/2
     image = utils.clip(image, 0, 1)
     return image
-
-
-def load_dataset(dataset, batch_size, imsize, distributed):
-    if dataset == "celeba":
-        return load_celeba_condition(batch_size, imsize)
-    if dataset == "ffhq":
-        return load_ffhq_condition(batch_size, imsize)
-    if dataset == "yfcc100m":
-        return load_yfcc100m(batch_size, imsize, distributed)
-    if dataset == "yfcc100m128":
-        return load_yfcc100m128(batch_size, imsize, distributed)
-    raise AssertionError("Dataset was incorrect", dataset)
 
 def preprocess_images(image, transition_variable, pool=torch.nn.AvgPool2d(2, 2)):
     image = image * 2 - 1
