@@ -608,7 +608,7 @@ class Trainer:
         to_backward2 = gradient_pen.mean() * 10 + 0 * wasserstein_distance.mean()
         with amp.scale_loss(to_backward2, self.d_optimizer, loss_id=1) as scaled_loss:
             scaled_loss.backward(retain_graph=True)
-        to_backward3 = epsilon_penalty.mean() * 0.005
+        to_backward3 = epsilon_penalty.mean() * 0.001
         with amp.scale_loss(to_backward3, self.d_optimizer, loss_id=2) as scaled_loss:
             scaled_loss.backward()
 

@@ -21,7 +21,7 @@ distributed_command = "" if num_gpus <= 1 else "-m torch.distributed.launch --np
 command = "nvidia-docker run --name {} \
         -v /dev/log:/home/haakohu/DeepPrivacy/log -u 1174424 -v {}:/workspace -v /raid/userdata/haakohu/deep_privacy/data:/workspace/data \
            -e CUDA_VISIBLE_DEVICES={}  --log-opt max-size=50m\
-           haakohu/pytorch python {} train.py {}".format(
+           haakohu/pytorch_beta python {} train.py {}".format(
             docker_container,
             filedir,
             gpu_id,
