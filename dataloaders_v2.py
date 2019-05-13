@@ -15,13 +15,13 @@ def load_dataset(dataset, batch_size, imsize, distributed):
         raise NotImplementedError
     if dataset == "yfcc100m":
         dirpath = os.path.join("data", "yfcc100m_torch")
-        return load_dataset(dirpath, imsize, batch_size, distributed)
+        return _load_dataset(dirpath, imsize, batch_size, distributed)
     if dataset == "yfcc100m128":
         dirpath = os.path.join("data", "yfcc100m128_torch")
-        return load_dataset(dirpath, imsize, batch_size, distributed)
-    if dataset == "yfcc100m128v2"
+        return _load_dataset(dirpath, imsize, batch_size, distributed)
+    if dataset == "yfcc100m128v2":
         dirpath = os.path.join("data", "yfcc100m128_torch_v2")
-        return load_dataset(dirpath, imsize, batch_size, distributed)
+        return _load_dataset(dirpath, imsize, batch_size, distributed)
     raise AssertionError("Dataset was incorrect", dataset)
 
 
@@ -97,7 +97,7 @@ def load_ffhq_condition(batch_size, imsize=128):
     return ConditionedCelebADataset("data/ffhq_torch", imsize, batch_size, landmarks_total=False)
 
 
-def load_dataset(dirpath, imsize, batch_size, distributed):
+def _load_dataset(dirpath, imsize, batch_size, distributed):
     images = load_numpy_files(os.path.join(dirpath, "original", str(imsize)))
     bounding_box_filepath = os.path.join(
         dirpath, "bounding_box", "{}.torch".format(imsize))
