@@ -16,3 +16,5 @@ __pycache__
 *.fid_cache
 *.gz
 *.ipynb
+scripts/.detectron_predictions
+scripts/debug
