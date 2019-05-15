@@ -6,22 +6,22 @@ import numpy as np
 from torchvision import transforms
 from data_sampelrs import ValidationSampler, TrainSampler
 
+MAX_VALIDATION_SIZE = 50000
 
-
-def load_dataset(dataset, batch_size, imsize, distributed):
+def load_dataset(dataset, batch_size, imsize, distributed, full_validation):
     if dataset == "celeba":
         raise NotImplementedError
     if dataset == "ffhq":
         raise NotImplementedError
     if dataset == "yfcc100m":
         dirpath = os.path.join("data", "yfcc100m_torch")
-        return _load_dataset(dirpath, imsize, batch_size, distributed)
+        return _load_dataset(dirpath, imsize, batch_size, distributed, full_validation)
     if dataset == "yfcc100m128":
         dirpath = os.path.join("data", "yfcc100m128_torch")
-        return _load_dataset(dirpath, imsize, batch_size, distributed)
+        return _load_dataset(dirpath, imsize, batch_size, distributed, full_validation)
     if dataset == "yfcc100m128v2":
         dirpath = os.path.join("data", "yfcc100m128_torch_v2")
-        return _load_dataset(dirpath, imsize, batch_size, distributed)
+        return _load_dataset(dirpath, imsize, batch_size, distributed, full_validation)
     raise AssertionError("Dataset was incorrect", dataset)
 
 
@@ -97,7 +97,7 @@ def load_ffhq_condition(batch_size, imsize=128):
     return ConditionedCelebADataset("data/ffhq_torch", imsize, batch_size, landmarks_total=False)
 
 
-def _load_dataset(dirpath, imsize, batch_size, distributed):
+def _load_dataset(dirpath, imsize, batch_size, distributed, full_validation):
     images = load_numpy_files(os.path.join(dirpath, "original", str(imsize)))
     bounding_box_filepath = os.path.join(
         dirpath, "bounding_box", "{}.torch".format(imsize))
@@ -110,11 +110,14 @@ def _load_dataset(dirpath, imsize, batch_size, distributed):
     assert os.path.isfile(
         landmark_filepath), "Did not find the landmark data. Looked in: {}".format(landmark_filepath)
     landmarks = torch.load(landmark_filepath).float() / imsize
-    validation_size = 10000#int(0.02*len(images))
+    if full_validation:
+        validation_size = MAX_VALIDATION_SIZE#int(0.02*len(images))
+    else:
+        validation_size = 10000
     # Keep out 50,000 images for final validation.
-    images_train, images_val = images[:-50000], images[-validation_size:]
-    bbox_train, bbox_val = bounding_boxes[:-50000], bounding_boxes[-validation_size:]
-    lm_train, lm_val = landmarks[:-50000], landmarks[-validation_size:]
+    images_train, images_val = images[:-MAX_VALIDATION_SIZE], images[-validation_size:]
+    bbox_train, bbox_val = bounding_boxes[:-MAX_VALIDATION_SIZE], bounding_boxes[-validation_size:]
+    lm_train, lm_val = landmarks[:-MAX_VALIDATION_SIZE], landmarks[-validation_size:]
 
     dataset_train = DeepPrivacyDataset(images_train, bbox_train, lm_train, True)
     dataset_val = DeepPrivacyDataset(images_val, bbox_val, lm_val, False)

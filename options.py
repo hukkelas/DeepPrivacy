@@ -18,6 +18,7 @@ DEFAULT_POSE_SIZE = 14
 OPTIONS_DIR = "options"
 DEFAULT_OPT_LEVEL = "O1"
 DEFAULT_DISCRIMINATOR_MODEL = "normal"
+DEFAULT_USE_FULL_VALIDATION = False
 os.makedirs(OPTIONS_DIR, exist_ok=True)
 
 
@@ -102,6 +103,9 @@ def load_options():
     parser.add_option("--discriminator-model", dest="discriminator_model",
                        help="Set the default discriminator architecture",
                        default=DEFAULT_DISCRIMINATOR_MODEL)
+    parser.add_option("--full-validation", dest="full_validation",
+                      help="Trigger to set use the full validation set (50K images)",
+                      default=DEFAULT_USE_FULL_VALIDATION)
     parser.add_option("--local_rank", default=0, type=int,)
 
     options, _ = parser.parse_args()

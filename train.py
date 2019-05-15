@@ -229,6 +229,7 @@ class Trainer:
         self.running_average_generator_decay = options.running_average_generator_decay
         self.pose_size = options.pose_size
         self.discriminator_model = options.discriminator_model
+        self.full_validation = options.full_validation
 
         # Image settings
         self.current_imsize = options.imsize
@@ -239,6 +240,7 @@ class Trainer:
         self.generated_data_dir = options.generated_data_dir
         self.checkpoint_dir = options.checkpoint_dir
         self.summaries_dir = options.summaries_dir
+        self.model_name = options.model_name
 
         # GPU SETTINGS
         self.distributed = options.distributed
@@ -282,7 +284,7 @@ class Trainer:
             self.extend_models()
             self.init_optimizers()
         self.dataloader_train, self.dataloader_val = load_dataset(
-            self.dataset, self.batch_size, self.current_imsize, self.distributed)
+            self.dataset, self.batch_size, self.current_imsize, self.distributed, self.full_validation)
 
         self.log_variable("stats/batch_size", self.batch_size)
         #self.discriminator.update_transition_value(self.transition_variable)
@@ -293,11 +295,12 @@ class Trainer:
         else:
             self.wgan_gp_scaler = amp.scaler.LossScaler(2**14)
 
-    def save_checkpoint(self, epoch):
+    def save_checkpoint(self, epoch, filepath=None):
         if self.local_rank != 0:
             return
-        filename = "step_{}.ckpt".format(self.global_step)
-        filepath = os.path.join(self.checkpoint_dir, filename)
+        if filepath is None:
+            filename = "step_{}.ckpt".format(self.global_step)
+            filepath = os.path.join(self.checkpoint_dir, filename)
         state_dict = {
             "epoch": epoch + 1,
             "D": self.discriminator.state_dict(),
@@ -528,9 +531,14 @@ class Trainer:
             real_images[start_idx:end_idx] = real_data.cpu().float()
             fake_images[start_idx:end_idx] = fake_data.detach().cpu().float()
             del real_data, fake_data, real_score, fake_score, wasserstein_distance, epsilon_penalty
+        to_nhwc = lambda x: np.stack((x[:,0], x[:, 1], x[:, 2]), axis=3)
+
+        fid_name = "{}_{}_{}".format(self.dataset, self.full_validation, self.current_imsize)
+        real_images = to_nhwc(real_images)
+        fake_images2 = to_nhwc(fake_images)
         if self.current_imsize >= 64:
             print("Calculating fid")
-            fid_val = fid.calculate_fid(real_images, fake_images, 8)
+            fid_val = fid.calculate_fid(real_images, fake_images2, False, 8, fid_name)
             if self.distributed:
                 fid_val = torch.tensor(fid_val, device="cuda:{}".format(self.local_rank))
                 fid_val = reduce_tensor(fid_val, self.world_size).item()
@@ -645,6 +653,13 @@ class Trainer:
                 self.total_time = (time.time() - self.start_time) / 60
                 # Log data
                 self.update_running_average_generator()
+                validation_checkpoint = 22 * 10**6
+                if self.global_step >= validation_checkpoint and (self.global_step - self.batch_size) < validation_checkpoint:
+                    print("Saving global checkpoint for validation")
+                    dirname = os.path.join("validation_checkpoints/{}".format(self.model_name))
+                    os.makedirs(dirname, exist_ok=True)
+                    fpath = os.path.join(dirname, "step_{}.ckpt".format(self.global_step))
+                    self.save_checkpoint(self.global_step, fpath)
                 if i % 50 == 0:
                     if self.distributed:
                         wasserstein_distance = reduce_tensor(wasserstein_distance.data,
@@ -678,7 +693,7 @@ class Trainer:
                         
                 self.global_step += self.batch_size*self.world_size
                 
-                if (self.global_step) % (self.batch_size*500) == 0:
+                if (self.global_step // self.batch_size * self.batch_size) % (self.batch_size*500) == 0:
                     self.generator.eval()
                     fake_data_sample = denormalize_img(
                         self.generator(condition, landmarks).detach().data)
@@ -720,7 +735,7 @@ class Trainer:
                         self.extend_models()
                         del self.dataloader_train, self.dataloader_val
                         self.dataloader_train, self.dataloader_val = load_dataset(
-                            self.dataset, self.batch_size, self.current_imsize, self.distributed)
+                            self.dataset, self.batch_size, self.current_imsize, self.distributed, self.full_validation)
                         self.is_transitioning = True
 
                         self.init_optimizers()

@@ -1,4 +1,4 @@
-data/
+data
 input_images/
 generated/
 generated_data/
@@ -13,3 +13,6 @@ test_examples/
 __pycache__
 *.zip
 *.out
+*.fid_cache
+*.gz
+*.ipynb
