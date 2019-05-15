@@ -13,7 +13,9 @@ from torchvision.transforms.functional import to_tensor
 from scripts.utils import draw_bboxes, draw_keypoints
 import tqdm
 
-def anonymize_single_bbox(image, keypoints, bbox, generator, imsize):
+image_idx = 0
+
+def anonymize_single_bbox(image, keypoints, bbox, generator, imsize, resize=True):
     x0, y0, x1, y1 = bbox
     try:
         x0_, y0_, w_, h_ = expand_bounding_box(*bbox, 0.35, image.shape)
@@ -31,6 +33,7 @@ def anonymize_single_bbox(image, keypoints, bbox, generator, imsize):
     # Resize to expected image size for generator
     to_generate = cv2.resize(to_generate, (imsize, imsize))
     to_generate = cut_bounding_box(to_generate, [x0, y0, x1, y1])
+    to_save = to_generate.copy()
     to_generate = to_tensor(to_generate)[None, :, :, :]
 
     # Match keypoint
@@ -51,7 +54,7 @@ def anonymize_single_bbox(image, keypoints, bbox, generator, imsize):
     final_keypoint /= w_
     final_keypoint = np.array([final_keypoint[j, i] for i in range(final_keypoint.shape[1]) for j in range(2)])
     final_keypoint = torch.from_numpy(final_keypoint).view(1, -1)
-
+    
     # Generator forward pass 
     to_generate = preprocess_images(to_generate, 1.0).cuda()
     to_generate = generator(to_generate, final_keypoint)
@@ -60,7 +63,8 @@ def anonymize_single_bbox(image, keypoints, bbox, generator, imsize):
     # Post-process generated image
     to_generate = image_to_numpy(to_generate.detach().cpu())[0]
     to_generate = (to_generate * 255).astype("uint8")
-    to_generate = cv2.resize(to_generate, (h_, w_))
+    if resize:
+        to_generate = cv2.resize(to_generate, (h_, w_), interpolation=cv2.INTER_AREA)
     return to_generate, orig_keypoint
 
 
@@ -89,6 +93,8 @@ def anonymize_image(image, keypoints, bounding_boxes, generator, imsize, anonymi
         to_replace = image[y0_:y0_+h_, x0_:x0_+w_]
         to_replace[replaced_mask_cut] = generated_face[replaced_mask_cut]
         image[y0_:y0_+h_, x0_:x0_+w_] = to_replace
+        x0, y0, x1, y1 = bbox
+        replaced_mask_cut[y0:y1, x0:x1, :] = 0
     #image = draw_bboxes(image, replaced_bboxes, (0, 0, 255))
     #image = draw_keypoints(image, replaced_keypoints, (0, 0, 255))
     return image

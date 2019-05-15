@@ -142,7 +142,7 @@ model = infer_engine.initialize_model_from_cfg(weights)
 
 def predict_keypoint(impath, kp_thresh=0.3):
     im = cv2.imread(impath)
-    max_res = 90000
+    max_res = 1080
     if max(im.shape) > max_res:
         scale_factor =  max_res / max(im.shape)
         im = cv2.resize(im, (0,0), fx=scale_factor, fy=scale_factor)
@@ -158,7 +158,7 @@ def predict_keypoint(impath, kp_thresh=0.3):
     keypoints = extract_keypoints(im, "lol", cls_boxes, cls_segms, cls_keyps, thresh=kp_thresh)
     if keypoints is None: return []
     keypoints = np.array(keypoints)
-    #keypoints /= scale_factor
+    keypoints /= scale_factor
     return keypoints
 
 

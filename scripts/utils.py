@@ -14,11 +14,11 @@ def draw_bboxes(image, bboxes, colors):
     return image
 
 
-def draw_keypoints(image, keypoints, colors):
+def draw_keypoints(image, keypoints, colors, num_keypoints=3):
     image = image.copy()
     for keypoint in keypoints:
-        X = keypoint[0, :3]
-        Y = keypoint[1, :3]
+        X = keypoint[0, :num_keypoints]
+        Y = keypoint[1, :num_keypoints]
         for x, y in zip(X, Y):
             cv2.circle(image, (x, y), 2, colors)
     return image

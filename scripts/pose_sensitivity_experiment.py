@@ -17,10 +17,18 @@ import os
 from dataset_tools.utils import expand_bounding_box
 from scripts.utils import init_generator, get_model_name, image_to_numpy, plot_pose, draw_bboxes, draw_keypoints
 #from detectron_scripts.infer_simple_v2 import predict_keypoint
-
-
-
 import utils
+
+
+
+def draw_keypoints(image, keypoints, colors):
+    image = image.copy()
+    for keypoint in keypoints:
+        X = keypoint[range(0, 14, 2)]
+        Y = keypoint[range(1, 14, 2)]
+        for x, y in zip(X, Y):
+            cv2.circle(image, (x, y), 3, colors)
+    return image
 
 if __name__ == "__main__":
     model_name = get_model_name()
@@ -43,26 +51,29 @@ if __name__ == "__main__":
     idx = -5
     
     orig = images[idx:idx+1].astype(np.float32) / 255
-    pose = landmarks[idx:idx+1]
+    orig_pose = landmarks[idx:idx+1]
     #print(dataloader.bounding_boxes.shape)
     x0, y0, x1, y1 = bounding_boxes[idx].numpy()
     width = x1 - x0
     height = y1 - y0
     assert orig.max() <= 1.0
     num_ims = 10
-    percentages = np.linspace(-0.3, 0.3, num_ims)
+    percentages = np.linspace(0.0, 0.1, num_ims)
     shift = 2
     final_im = np.ones((imsize*2 + shift, imsize*num_ims + shift*(num_ims-1), 3), dtype=np.uint8) * 255
 
     for i in range(num_ims):
         p = percentages[i]
-        x0_altered = x0 - int(p*width)
-        x1_altered = x1 + int(p*width)
-        y0_altered = max(y0 - int(p*height), 0)
-        y1_altered = min(y1 + int(p*height), imsize)
         im = orig.copy()
-        im[0] = cut_bounding_box(im[0], [int(x) for x in [x0_altered, y0_altered, x1_altered, y1_altered]])
+        pose = orig_pose.clone()
+        rand = torch.rand(pose.shape) - 0.5
+        rand = rand / 0.5 
+        rand = rand * percentages[i]
+        pose += rand
+        
         cut_im = im[0].copy()
+        im[0] = cut_bounding_box(im[0], [int(i) for i in [x0, y0, x1, y1]])
+        
         im = torch.from_numpy(np.rollaxis(im[0],2))[None, :, :, :]
         print(im.dtype)
         assert list(im.shape) == [1, 3, imsize, imsize], "Shape was:{}".format(im.shape)
@@ -84,10 +95,10 @@ if __name__ == "__main__":
         plot_pose(pose.numpy(), imsize, imsize)
         plt.savefig(os.path.join(savedir, "debug", "{:.3f}.jpg".format(percentages[i])))
         plt.close()
-
-
+        
+        cut_im = draw_keypoints(cut_im, pose*imsize, (255, 0, 0))
         # Register normal im
         final_im[:imsize, (imsize+shift)*i:(imsize+shift)*i + imsize, :] = utils.clip(cut_im * 255, 0, 255).astype(np.uint8)
         final_im[imsize+shift:, (imsize+shift)*i:(imsize+shift)*i + imsize, :] = utils.clip(im * 255, 0, 255).astype(np.uint8)
-    plt.imsave(os.path.join(savedir, "bounding_box_sensitivity.png"), final_im)
+    plt.imsave(os.path.join(savedir, "pose_sensitivity.png"), final_im)
     print("Results saved to:", savedir)
