@@ -160,18 +160,21 @@ def denormalize_img(image):
     image = utils.clip(image, 0, 1)
     return image
 
+
 def preprocess_images(image, transition_variable, pool=torch.nn.AvgPool2d(2, 2)):
     image = image * 2 - 1
     image = interpolate_image(pool, image, transition_variable)
     return image
 
+
 class DataPrefetcher():
 
-    def __init__(self, loader, transition_variable):
+    def __init__(self, loader, transition_variable, pose_size):
         self.pool = torch.nn.AvgPool2d(2, 2)
         self.loader = iter(loader)
         self.stream = torch.cuda.Stream()
         self.preload(transition_variable)
+        self.pose_size = pose_size
 
     def preload(self, transition_variable):
         try:
@@ -205,7 +208,7 @@ class DataPrefetcher():
         next_condition = self.next_condition
         next_landmark = self.next_landmark
         self.preload(transition_variable)
-        return next_image, next_condition, next_landmark#[:, :1]
+        return next_image, next_condition, next_landmark[:, :self.pose_size]
 
 
 def interpolate_image(pool, images, transition_variable):
@@ -473,7 +476,7 @@ class Trainer:
                 self.writer.add_scalar(name, value, global_step=self.global_step)
 
     def save_transition_image(self, before):
-        prefetcher = DataPrefetcher(self.dataloader_val, self.transition_variable)
+        prefetcher = DataPrefetcher(self.dataloader_val, self.transition_variable, self.pose_size)
         real_image, condition, landmark = prefetcher.next(self.transition_variable)
 
         fake_data = self.generator(condition, landmark)
@@ -508,7 +511,8 @@ class Trainer:
                                    self.current_imsize,
                                    self.current_imsize))
         data_prefetcher = DataPrefetcher(self.dataloader_val,
-                                         self.transition_variable)
+                                         self.transition_variable,
+                                         self.pose_size)
         for idx in tqdm.trange(len(self.dataloader_val)):
             real_data, condition, landmarks = data_prefetcher.next(self.transition_variable)
             fake_data = self.running_average_generator(condition,
@@ -624,7 +628,9 @@ class Trainer:
 
     def train(self):
         for epoch in range(self.start_epoch, int(1e16)):
-            prefetcher = DataPrefetcher(self.dataloader_train, self.transition_variable)
+            prefetcher = DataPrefetcher(self.dataloader_train,
+                                        self.transition_variable,
+                                        self.pose_size)
             for i in range(len(self.dataloader_train)):
                 batch_start_time = time.time()
                 self.d_optimizer.zero_grad()
@@ -653,7 +659,7 @@ class Trainer:
                 self.total_time = (time.time() - self.start_time) / 60
                 # Log data
                 self.update_running_average_generator()
-                validation_checkpoint = 22 * 10**6
+                validation_checkpoint = 30 * 10**6
                 if self.global_step >= validation_checkpoint and (self.global_step - self.batch_size) < validation_checkpoint:
                     print("Saving global checkpoint for validation")
                     dirname = os.path.join("validation_checkpoints/{}".format(self.model_name))

@@ -29,7 +29,7 @@ def image_to_numpy(images):
     if len(images.shape) == 3:
         single_image = True
         images = images[None]
-    images = images.data.cpu().numpy()
+    images = images.data.detach().cpu().numpy()
     r,g,b = images[:, 0], images[:, 1], images[:, 2]
     images = np.stack((r,g,b), axis=3)
     if single_image:

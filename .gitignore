@@ -16,3 +16,6 @@ __pycache__
 *.fid_cache
 *.gz
 *.ipynb
+validation_checkpoints/
+test_scripts/
+fid/
