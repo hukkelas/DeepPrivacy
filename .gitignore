@@ -19,3 +19,5 @@ __pycache__
 validation_checkpoints/
 test_scripts/
 fid/
+scripts/.detectron_predictions
+scripts/debug

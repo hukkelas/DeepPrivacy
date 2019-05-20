@@ -97,7 +97,7 @@ def load_ffhq_condition(batch_size, imsize=128):
     return ConditionedCelebADataset("data/ffhq_torch", imsize, batch_size, landmarks_total=False)
 
 
-def _load_dataset(dirpath, imsize, batch_size, distributed, full_validation):
+def load_dataset_files(dirpath, imsize):
     images = load_numpy_files(os.path.join(dirpath, "original", str(imsize)))
     bounding_box_filepath = os.path.join(
         dirpath, "bounding_box", "{}.torch".format(imsize))
@@ -110,6 +110,12 @@ def _load_dataset(dirpath, imsize, batch_size, distributed, full_validation):
     assert os.path.isfile(
         landmark_filepath), "Did not find the landmark data. Looked in: {}".format(landmark_filepath)
     landmarks = torch.load(landmark_filepath).float() / imsize
+
+    return images, bounding_boxes, landmarks
+
+
+def _load_dataset(dirpath, imsize, batch_size, distributed, full_validation):
+    images, bounding_boxes, landmarks = load_dataset_files(dirpath, imsize)
     if full_validation:
         validation_size = MAX_VALIDATION_SIZE#int(0.02*len(images))
     else:
@@ -181,5 +187,5 @@ def cut_bounding_box(condition, bounding_boxes):
     std = previous_image.std()
     replacement = np.random.normal(mean, std,
                                    size=previous_image.shape)
-    previous_image[:, :, :] = replacement.astype(np.uint8)
+    previous_image[:, :, :] = replacement.astype(condition.dtype)
     return condition
