@@ -43,6 +43,7 @@ if __name__ == "__main__":
     to_save = orig.squeeze()
     num_iterations = 20
     max_levels = np.linspace(0.2, 2.0, num_iterations)
+    final_images = []
     for i in range(num_iterations):
         im = orig.copy()
         im[0] = cut_bounding_box(im[0], [int(x) for x in [x0, y0, x1, y1]])
@@ -55,7 +56,27 @@ if __name__ == "__main__":
         
         im = image_to_numpy(im.squeeze())
         to_save = np.concatenate((to_save, im), axis=1)
+        final_images.append(im)
+    for j in range(num_iterations-1):
+        diff = abs(final_images[j] - final_images[j+1])
+        print("Diff {}: {}".format(j, diff.mean()))
     savepath = os.path.join(savedir, "result_image_trunc.jpg")
     plt.imsave(savepath, to_save)
 
     print("Results saved to:", savedir)
+    to_save = np.zeros((imsize*num_iterations, imsize*num_iterations, 3))
+    savedir = os.path.join(savedir, "diff_results")
+    os.makedirs(savedir, exist_ok=True)
+    for r in range(num_iterations):
+        for c in range(num_iterations):
+            im1 = final_images[r]
+            im2 = final_images[c]
+            diff = abs(im2 - im1)
+            print(r,c, diff.max())
+            if diff.max() == 0:
+                diff[0,0, 0] = 1
+            diff = diff / diff.max()
+            to_save = np.column_stack((im1, im2, diff))
+            savepath = os.path.join(savedir, "res_{}_{}.jpg".format(r, c))
+            plt.imsave(savepath, to_save)
+
