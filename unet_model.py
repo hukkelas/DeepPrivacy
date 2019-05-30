@@ -50,7 +50,7 @@ pose_indexes = {
 
 def generate_pose_channel_images(min_imsize, max_imsize, device, pose_information, dtype):
     batch_size = pose_information.shape[0]
-    if pose_information.shape[1] == 1:
+    if pose_information.shape[1] == 2:
         pose_images = []
         imsize = min_imsize
         while imsize <= max_imsize:
