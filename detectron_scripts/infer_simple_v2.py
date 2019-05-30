@@ -159,6 +159,10 @@ def predict_keypoint(impath, kp_thresh=0.3):
     if keypoints is None: return []
     keypoints = np.array(keypoints)
     keypoints /= scale_factor
+    # Try to sort...
+    score = keypoints[:, 2, :].sum(axis=1)
+    sortex_idx = np.argsort(score)[::-1]
+    keypoints = keypoints[sortex_idx]
     return keypoints
 
 

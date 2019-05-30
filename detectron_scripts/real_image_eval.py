@@ -39,7 +39,7 @@ if __name__ == "__main__":
     for e in endings:
         image_paths += glob.glob(os.path.join(source_dir, e))
     for impath in image_paths:
-        #if not "x" in os.path.basename(impath): continue
+        #if not "klasseb" in os.path.basename(impath): continue
         #print(impath)
         #if "obama" not in impath: continue
         #if "selfie3" in impath: continue
@@ -49,10 +49,10 @@ if __name__ == "__main__":
         #    ratio = 1080 / max(im.shape)
         #    im = cv2.resize(im, (0, 0), fx=ratio, fy=ratio)
         #print(im.shape)
-        keypoints = predict_keypoint(impath)
+        keypoints = predict_keypoint(impath, 0)
         #print(keypoints)
         if len(keypoints) == 0:
-            continue 
+            continue
         keypoints = keypoints[:, :2, :pose_size]
         bounding_boxes = detect_and_supress(im)
         orig_keypoints = keypoints.copy()
@@ -117,12 +117,13 @@ if __name__ == "__main__":
             os.makedirs(debug_dir, exist_ok=True)
             debug_path = os.path.join(debug_dir, "{}_{}.jpg".format(os.path.basename(impath).split(".")[0], idx))
             debug_path2 = os.path.join(debug_dir, "{}_{}_no_mark.jpg".format(os.path.basename(impath).split(".")[0], idx))
+            plt.imsave(debug_path2, debug_image)
             debug_image = draw_bboxes(debug_image, [bbox], (255, 0, 0))
             debug_image = draw_keypoints(debug_image, [final_keypoint], (255, 0, 0), 7)
             final_keypoint[0, :] += imsize
             debug_image = draw_keypoints(debug_image, [final_keypoint], (255, 0, 0), 7)
             # Modify debug image
-            plt.imsave(debug_path2, debug_image)
+            
             #exit(0)
             #plt.legend()
             plt.ylim([debug_orig.shape[0], 0])
@@ -156,7 +157,7 @@ if __name__ == "__main__":
         save_path = "{}_detected.jpg".format(save_path)
         save_path = os.path.join(savedir, save_path)
         image = draw_bboxes(im, bounding_boxes, (255, 0, 0))
-        #image = draw_keypoints(image, keypoints)
+        image = draw_keypoints(image, keypoints, (255, 0, 0))
         for idx, bbox in enumerate(bounding_boxes):
             x0, y0, x1, y1 = bbox
             width = x1 - x0 
