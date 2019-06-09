@@ -31,7 +31,7 @@ def anonymize_single_bbox(image, keypoints, bbox, generator, imsize, resize=True
     x0, y0, x1, y1 = [int(k/w_ * imsize) for k in [x0, y0, x1, y1]]
     
     # Resize to expected image size for generator
-    to_generate = cv2.resize(to_generate, (imsize, imsize))
+    to_generate = cv2.resize(to_generate, (imsize, imsize), interpolation=cv2.INTER_AREA)
     to_generate = cut_bounding_box(to_generate, [x0, y0, x1, y1])
     to_save = to_generate.copy()
     to_generate = to_tensor(to_generate)[None, :, :, :]
@@ -64,7 +64,7 @@ def anonymize_single_bbox(image, keypoints, bbox, generator, imsize, resize=True
     to_generate = image_to_numpy(to_generate.detach().cpu())[0]
     to_generate = (to_generate * 255).astype("uint8")
     if resize:
-        to_generate = cv2.resize(to_generate, (h_, w_), interpolation=cv2.INTER_AREA)
+        to_generate = cv2.resize(to_generate, (h_, w_))
     return to_generate, orig_keypoint
 
 
@@ -164,6 +164,7 @@ def get_bounding_boxes(opts, dataset):
 
 def get_detectron_keypoint(total_filepath, threshold):
     filename = total_filepath.replace("/", "-")
+    os.makedirs(os.path.join("scripts", ".detectron_predictions"), exist_ok=True)
     prediction_path = os.path.join("scripts", ".detectron_predictions", filename + "_{}.npy".format(threshold))
     if os.path.isfile(prediction_path):
         return np.load(prediction_path)
@@ -200,7 +201,7 @@ if __name__ == "__main__":
         im_bounding_boxes = bounding_boxes[filepath]
         image_keypoints = get_detectron_keypoint(total_filepath, 0)#
         np.save("test.npy", image_keypoints)
-        if image_keypoints is None or image_keypoints.tolist() is None  or  len(image_keypoints) == 0:
+        if image_keypoints is None or len(image_keypoints) == 0 or image_keypoints.tolist() is None:
             new_filepath = os.path.join(opts.target_dir, filepath)
             cv2.imwrite(new_filepath, im[:, :, ::-1])
             continue

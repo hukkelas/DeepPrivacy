@@ -156,7 +156,7 @@ def predict_keypoint(impath, kp_thresh=0.3):
         )
 
     keypoints = extract_keypoints(im, "lol", cls_boxes, cls_segms, cls_keyps, thresh=kp_thresh)
-    if keypoints is None: return []
+    if keypoints is None or keypoints == []: return []
     keypoints = np.array(keypoints)
     keypoints /= scale_factor
     # Try to sort...

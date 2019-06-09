@@ -34,10 +34,11 @@ def anonymize_single_bbox(image, keypoints, bbox, generator, imsize):
     x1_, y1_ = x0_ + w_, y0_ + h_
     to_generate = image[y0_:y1_, x0_:x1_].copy()
     mean, std = image.mean(), image.std()
-
+    to_generate = cv2.resize(to_generate, (imsize, imsize), interpolation=cv2.INTER_AREA)
     # Shift and scale original bounding box 
     x0, x1 = x0 - x0_, x1 - x0_
     y0, y1 = y0 - y0_, y1 - y0_
+    x0, y0, x1, y1 = [int(k/w_ * imsize) for k in [x0, y0, x1, y1]]
     to_replace = to_generate[y0:y1, x0:x1, :]
     w, h = x1 - x0, y1 - y0 
     s = min(w,h)
@@ -55,6 +56,7 @@ def anonymize_single_bbox(image, keypoints, bbox, generator, imsize):
     if final_keypoint is None:
         return None  
     orig_keypoint = final_keypoint.copy()
+    to_generate = cv2.resize(to_generate, (h_, w_))
     # Shift and scale original keypoints
     return to_generate, orig_keypoint
 
