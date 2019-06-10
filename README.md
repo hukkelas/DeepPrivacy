@@ -5,13 +5,18 @@
 - Apex
 - Python >= 3.6
 - Apex for pytorch
+- NVIDIA GPU
 
 Install dependencies 
 
 ```pip install -r requirements.txt``` 
 
+## Pre-trained model
+
+Download from [https://drive.google.com/open?id=16NeOjlEaJnuH_HWHvFRyGHSGMflO3vvU](Google Drive)
+
 ## Dataset download and pre-processing
-1. Contact either Håkon Hukkelås (hakon.hukkelas@ntnu.no) or Frank Lindseth (frankl@ntnu.no) to retrieve the dataset
+1. The dataset is rather large (83GB). Contact either Håkon Hukkelås (hakon.hukkelas@ntnu.no) or Frank Lindseth (frankl@ntnu.no) to retrieve the dataset
 
 
 ## Get started 
