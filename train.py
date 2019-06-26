@@ -250,6 +250,10 @@ class Trainer:
         self.local_rank = options.local_rank
         self.world_size = options.world_size
 
+        # validation checkpoint
+        self.next_validation_checkpoint = 0
+        self.validation_checkpoint_skip = 2e5
+
         # Transition settings
         self.transition_variable = 1.
         self.transition_iters = options.transition_iters
@@ -513,7 +517,7 @@ class Trainer:
         data_prefetcher = DataPrefetcher(self.dataloader_val,
                                          self.transition_variable,
                                          self.pose_size)
-        for idx in tqdm.trange(len(self.dataloader_val)):
+        for idx in tqdm.trange(len(self.dataloader_val), desc="Validating model!"):
             real_data, condition, landmarks = data_prefetcher.next(self.transition_variable)
             fake_data = self.running_average_generator(condition,
                                                        landmarks)
@@ -721,8 +725,9 @@ class Trainer:
                         to_save = denormalize_img(condition[:, :3])
                         torchvision.utils.save_image(to_save, filepath, nrow=10)
                 each_step = 4e6 if self.current_imsize <= 32 else 2e5
-                if self.global_step//self.batch_size*self.batch_size % (each_step//self.batch_size * self.batch_size) == 0:
+                if self.global_step > self.next_validation_checkpoint:
                     self.save_checkpoint(epoch)
+                    self.next_validation_checkpoint += self.validation_checkpoint_skip
                     self.validate_model()
                 if self.global_step >= (self.latest_switch + self.transition_iters):
                     self.latest_switch += self.transition_iters
