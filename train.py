@@ -334,7 +334,8 @@ class Trainer:
             "latest_switch": self.latest_switch,
             "pose_size": self.pose_size,
             "opt_level": self.opt_level,
-            "discriminator_model": self.discriminator_model
+            "discriminator_model": self.discriminator_model,
+            "next_validation_checkpoint": self.next_validation_checkpoint
         }
         save_checkpoint(state_dict,
                         filepath,
@@ -361,6 +362,7 @@ class Trainer:
             self.image_channels = ckpt["image_channels"]
             self.max_imsize = ckpt["max_imsize"]
             self.pose_size = ckpt["pose_size"]
+            
 
             # Logging variables
             # Transition settings
@@ -372,6 +374,7 @@ class Trainer:
             self.global_step = ckpt["global_step"]
             self.start_time = time.time() - ckpt["total_time"] * 60
             self.opt_level = ckpt["opt_level"]
+            self.next_validation_checkpoint = self.global_step#ckpt["next_validation_checkpoint"]#
             current_channels = ckpt["start_channel_size"]
             self.transition_channels = [
                 current_channels,
@@ -540,17 +543,14 @@ class Trainer:
             fake_images[start_idx:end_idx] = fake_data.detach().cpu().float()
             del real_data, fake_data, real_score, fake_score, wasserstein_distance, epsilon_penalty
         to_nhwc = lambda x: np.stack((x[:,0], x[:, 1], x[:, 2]), axis=3)
-
         fid_name = "{}_{}_{}".format(self.dataset, self.full_validation, self.current_imsize)
         real_images = to_nhwc(real_images)
         fake_images2 = to_nhwc(fake_images)
         if self.current_imsize >= 64:
-            print("Calculating fid")
             fid_val = fid.calculate_fid(real_images, fake_images2, False, 8, fid_name)
             if self.distributed:
                 fid_val = torch.tensor(fid_val, device="cuda:{}".format(self.local_rank))
                 fid_val = reduce_tensor(fid_val, self.world_size).item()
-            print("FID:", fid_val)
             self.log_variable("stats/fid", np.mean(fid_val), True)
         self.log_variable('discriminator/wasserstein-distance',
                           np.mean(wasserstein_distances), True)

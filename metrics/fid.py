@@ -193,11 +193,11 @@ def preprocess_images(images, use_multiprocessing):
     if use_multiprocessing:
         with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
             jobs = []
-            for im in images:
+            for im in tqdm.tqdm(images, desc="Starting FID jobs"):
                 job = pool.apply_async(preprocess_image, (im,))
                 jobs.append(job)
             final_images = torch.zeros(images.shape[0], 3, 299, 299)
-            for idx, job in enumerate(tqdm(jobs)):
+            for idx, job in enumerate(tqdm(jobs, desc="finishing jobs")):
                 im = job.get()
                 final_images[idx] = im#job.get()
     else:
