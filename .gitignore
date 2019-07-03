@@ -22,3 +22,4 @@ test_scripts/
 fid/
 scripts/.detectron_predictions
 scripts/debug
+.results
