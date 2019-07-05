@@ -103,12 +103,12 @@ class Generator(nn.Module):
         self.to_rgb_old = WSConv2d(start_channel_dim, self.image_channels, 1, 0)
 
         self.core_blocks_down = nn.ModuleList([
-            to_cuda(UnetDownSamplingBlock(start_channel_dim, start_channel_dim)),
+            UnetDownSamplingBlock(start_channel_dim, start_channel_dim)
         ])
         self.core_blocks_up = nn.ModuleList([
             nn.Sequential(
                 conv_bn_relu(start_channel_dim+self.num_poses, start_channel_dim, 1, 0),
-                to_cuda(UnetUpsamplingBlock(start_channel_dim, start_channel_dim))
+                UnetUpsamplingBlock(start_channel_dim, start_channel_dim)
             )
             
         ])
@@ -116,10 +116,8 @@ class Generator(nn.Module):
         self.new_up = nn.Sequential()
         self.old_up = nn.Sequential()
         self.new_down = nn.Sequential()
-        self.from_rgb_new = to_cuda(
-            conv_bn_relu(self.image_channels, start_channel_dim, 1, 0))
-        self.from_rgb_old = to_cuda(
-            conv_bn_relu(self.image_channels, start_channel_dim, 1, 0))
+        self.from_rgb_new = conv_bn_relu(self.image_channels, start_channel_dim, 1, 0)
+        self.from_rgb_old =  conv_bn_relu(self.image_channels, start_channel_dim, 1, 0)
         self.current_imsize = 4
         self.upsampling = UpSamplingBlock()
         self.prev_channel_size = start_channel_dim
@@ -155,21 +153,19 @@ class Generator(nn.Module):
             self.new_up = nn.Sequential(*new_up_blocks)
             self.core_blocks_up.append(self.new_up)
 
-        self.from_rgb_new = to_cuda(
-            conv_bn_relu(self.image_channels, output_dim, 1, 0))
+        self.from_rgb_new =  conv_bn_relu(self.image_channels, output_dim, 1, 0)
         self.new_down = nn.Sequential(
             UnetDownSamplingBlock(output_dim, self.prev_channel_size)
         )
-        self.new_down = to_cuda(self.new_down)
+        self.new_down = self.new_down
         # Upsampling modules
         self.to_rgb_old = self.to_rgb_new
-        self.to_rgb_new = to_cuda(
-            WSConv2d(output_dim, self.image_channels, 1, 0))
+        self.to_rgb_new = WSConv2d(output_dim, self.image_channels, 1, 0)
 
-        self.new_up = to_cuda(nn.Sequential(
+        self.new_up = nn.Sequential(
             conv_bn_relu(self.prev_channel_size*2+self.num_poses, self.prev_channel_size, 1, 0),
             UnetUpsamplingBlock(self.prev_channel_size, output_dim)
-        ))
+        )
         self.prev_channel_size = output_dim
 
     def new_parameters(self):

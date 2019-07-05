@@ -14,6 +14,7 @@ from options import load_options, print_options, DEFAULT_IMSIZE
 from metrics import fid
 import tqdm
 import apex
+from data_tools.data_utils import DataPrefetcher
 
 if False:
     torch.manual_seed(0)
@@ -22,7 +23,6 @@ if False:
     torch.backends.cudnn.deterministic = True
     torch.set_printoptions(precision=10)
 else:
-
     torch.backends.cudnn.benchmark = True
 
 
@@ -72,16 +72,11 @@ class NetworkWrapper(torch.nn.Module):
         super().__init__()
         self.network = network
         self.distributed = distributed
-        if distributed:
-            # Does not work with delay_allreduce=False 
-            # 
-            self.forward_block = torch.nn.parallel.DistributedDataParallel(
-                self.network,
-                device_ids=[local_rank],
-                output_device=local_rank
-            )
-        else:
-            self.forward_block = self.network
+        #self.forward_block = torch.nn.DataParallel(
+        #    self.network,
+        #    device_ids=list(range(torch.cuda.device_count() ))
+        #)
+        self.forward_block = to_cuda(self.network)
 
     def forward(self, *inputs):
         return self.forward_block(*inputs)
@@ -107,7 +102,11 @@ class NetworkWrapper(torch.nn.Module):
         network.load_state_dict(self.network.state_dict())
         network.extend(channel_size)
         del self.network
-        self.network = to_cuda(network)
+        self.network = network
+        self.forward_block = torch.nn.DataParallel(
+            self.network,
+            device_ids=list(range(torch.cuda.device_count()))
+        )
         
 
     def update_transition_value(self, value):
@@ -135,15 +134,15 @@ def init_model(imsize, pose_size, start_channel_dim, image_channels, distributed
                                   start_channel_dim,
                                   pose_size)
     generator = Generator(pose_size, start_channel_dim, image_channels)
-    to_cuda([discriminator, generator])
-    #discriminator, generator = wrap_models([discriminator, generator], distributed)
+    #to_cuda([discriminator, generator])
+    discriminator, generator = wrap_models([discriminator, generator], distributed, 0)
     return discriminator, generator
 
 
 def wrap_models(models, distributed, local_rank):
     if isinstance(models, tuple) or isinstance(models, list):
-        return [to_cuda(NetworkWrapper(x, distributed, local_rank)) for x in models]
-    return to_cuda(NetworkWrapper(models, distributed, local_rank))
+        return [NetworkWrapper(x, distributed, local_rank) for x in models]
+    return NetworkWrapper(models, distributed, local_rank)
 
 
 def save_images(writer, images, global_step, directory):
@@ -165,58 +164,6 @@ def preprocess_images(image, transition_variable, pool=torch.nn.AvgPool2d(2, 2))
     image = image * 2 - 1
     image = interpolate_image(pool, image, transition_variable)
     return image
-
-
-class DataPrefetcher():
-
-    def __init__(self, loader, transition_variable, pose_size):
-        self.pool = torch.nn.AvgPool2d(2, 2)
-        self.loader = iter(loader)
-        self.stream = torch.cuda.Stream()
-        self.preload(transition_variable)
-        self.pose_size = pose_size
-
-    def preload(self, transition_variable):
-        try:
-            self.next_image, self.next_condition, self.next_landmark = next(self.loader)
-        except StopIteration:
-            self.next_image = None
-            self.next_condition = None
-            self.next_landmark = None
-            return
-        with torch.cuda.stream(self.stream):
-            self.next_image = self.next_image.cuda(non_blocking=True).float()
-            self.next_condition = self.next_condition.cuda(non_blocking=True).float()
-            self.next_landmark = self.next_landmark.cuda(non_blocking=True)
-            
-            self.next_image = self.next_image / 255
-            self.next_image = self.next_image*2 - 1
-
-            self.next_condition = self.next_condition / 255
-            self.next_condition = self.next_condition*2 - 1
-
-            self.next_image = interpolate_image(self.pool,
-                                                self.next_image,
-                                                transition_variable)
-            self.next_condition = interpolate_image(self.pool,
-                                                    self.next_condition,
-                                                    transition_variable)
-
-    def next(self, transition_variable):
-        torch.cuda.current_stream().wait_stream(self.stream)
-        next_image = self.next_image
-        next_condition = self.next_condition
-        next_landmark = self.next_landmark
-        self.preload(transition_variable)
-        return next_image, next_condition, next_landmark[:, :self.pose_size]
-
-
-def interpolate_image(pool, images, transition_variable):
-    y = pool(images)
-    y = torch.nn.functional.interpolate(y, scale_factor=2)
-
-    images = utils.get_transition_value(y, images, transition_variable)
-    return images
 
 
 class Trainer:
@@ -249,6 +196,10 @@ class Trainer:
         self.distributed = options.distributed
         self.local_rank = options.local_rank
         self.world_size = options.world_size
+
+        # validation checkpoint
+        self.next_validation_checkpoint = 0
+        self.validation_checkpoint_skip = 2e5
 
         # Transition settings
         self.transition_variable = 1.
@@ -330,7 +281,8 @@ class Trainer:
             "latest_switch": self.latest_switch,
             "pose_size": self.pose_size,
             "opt_level": self.opt_level,
-            "discriminator_model": self.discriminator_model
+            "discriminator_model": self.discriminator_model,
+            "next_validation_checkpoint": self.next_validation_checkpoint
         }
         save_checkpoint(state_dict,
                         filepath,
@@ -357,6 +309,7 @@ class Trainer:
             self.image_channels = ckpt["image_channels"]
             self.max_imsize = ckpt["max_imsize"]
             self.pose_size = ckpt["pose_size"]
+            
 
             # Logging variables
             # Transition settings
@@ -368,6 +321,7 @@ class Trainer:
             self.global_step = ckpt["global_step"]
             self.start_time = time.time() - ckpt["total_time"] * 60
             self.opt_level = ckpt["opt_level"]
+            self.next_validation_checkpoint = self.global_step#ckpt["next_validation_checkpoint"]#
             current_channels = ckpt["start_channel_size"]
             self.transition_channels = [
                 current_channels,
@@ -414,16 +368,16 @@ class Trainer:
         self.running_average_generator = amp.initialize(self.running_average_generator, None, opt_level=self.opt_level)
         self.running_average_generator = NetworkWrapper(
             self.running_average_generator, self.distributed, self.local_rank)
-        self.running_average_generator = to_cuda(
-            self.running_average_generator)
 
     def extend_running_average_generator(self, current_channels):
         g = self.running_average_generator
         g.extend(current_channels)
+        
         for avg_param, cur_param in zip(g.new_parameters(), self.generator.new_parameters()):
             assert avg_param.data.shape == cur_param.data.shape, "AVG param: {}, cur_param: {}".format(avg_param.shape, cur_param.shape)
             avg_param.data = cur_param.data
         self.running_average_generator = self.running_average_generator.network
+        self.running_average_generator.cuda()
         self.running_average_generator = amp.initialize(self.running_average_generator, None, opt_level=self.opt_level)
         self.running_average_generator = NetworkWrapper(self.running_average_generator, self.distributed, self.local_rank)
 
@@ -456,16 +410,21 @@ class Trainer:
         self.initialize_amp()
 
     def initialize_amp(self):
-        if isinstance(self.generator, NetworkWrapper):
-            self.generator = self.generator.network
-        if isinstance(self.discriminator, NetworkWrapper):
-            self.discriminator = self.discriminator.network
+        
+        if False:#isinstance(self.generator, NetworkWrapper):
+            self.generator = to_cuda(self.generator.network)
+        else:
+            to_cuda(self.generator)
+        if False:#isinstance(self.discriminator, NetworkWrapper):
+            self.discriminator = to_cuda(self.discriminator.network)
+        else:
+            to_cuda(self.discriminator)
         [self.generator, self.discriminator], [self.g_optimizer, self.d_optimizer] = amp.initialize(
             [self.generator, self.discriminator],
             [self.g_optimizer, self.d_optimizer],
             opt_level=self.opt_level,
             num_losses=4)
-        self.discriminator, self.generator = wrap_models([self.discriminator, self.generator], self.distributed, self.local_rank)
+        #self.discriminator, self.generator = wrap_models([self.discriminator, self.generator], self.distributed, self.local_rank)
 
     def log_variable(self, name, value, log_to_validation=False):
         if self.local_rank == 0:
@@ -513,7 +472,7 @@ class Trainer:
         data_prefetcher = DataPrefetcher(self.dataloader_val,
                                          self.transition_variable,
                                          self.pose_size)
-        for idx in tqdm.trange(len(self.dataloader_val)):
+        for idx in tqdm.trange(len(self.dataloader_val), desc="Validating model!"):
             real_data, condition, landmarks = data_prefetcher.next(self.transition_variable)
             fake_data = self.running_average_generator(condition,
                                                        landmarks)
@@ -536,17 +495,14 @@ class Trainer:
             fake_images[start_idx:end_idx] = fake_data.detach().cpu().float()
             del real_data, fake_data, real_score, fake_score, wasserstein_distance, epsilon_penalty
         to_nhwc = lambda x: np.stack((x[:,0], x[:, 1], x[:, 2]), axis=3)
-
         fid_name = "{}_{}_{}".format(self.dataset, self.full_validation, self.current_imsize)
         real_images = to_nhwc(real_images)
         fake_images2 = to_nhwc(fake_images)
         if self.current_imsize >= 64:
-            print("Calculating fid")
             fid_val = fid.calculate_fid(real_images, fake_images2, False, 8, fid_name)
             if self.distributed:
                 fid_val = torch.tensor(fid_val, device="cuda:{}".format(self.local_rank))
                 fid_val = reduce_tensor(fid_val, self.world_size).item()
-            print("FID:", fid_val)
             self.log_variable("stats/fid", np.mean(fid_val), True)
         self.log_variable('discriminator/wasserstein-distance',
                           np.mean(wasserstein_distances), True)
@@ -582,14 +538,7 @@ class Trainer:
         gradient_pen = gradient_penalty(
             real_data.data, fake_data.detach(), self.discriminator,
             condition, landmarks, self.wgan_gp_scaler)
-        if self.distributed:
-            should_skip = torch.tensor(gradient_pen is None, device=fake_data.device)
-            torch.distributed.all_reduce(should_skip,
-                                         op=torch.distributed.ReduceOp.SUM)
-            should_skip = should_skip.item() != 0
-        else:
-            should_skip = gradient_pen is None
-        if should_skip:
+        if gradient_pen is None:
             return None
         # Epsilon penalty
         epsilon_penalty = (real_scores ** 2).squeeze()
@@ -667,7 +616,7 @@ class Trainer:
                     fpath = os.path.join(dirname, "step_{}.ckpt".format(self.global_step))
                     self.save_checkpoint(self.global_step, fpath)
                 if i % 50 == 0:
-                    if self.distributed:
+                    if False:#self.distributed:
                         wasserstein_distance = reduce_tensor(wasserstein_distance.data,
                                                              self.world_size)
 
@@ -721,8 +670,9 @@ class Trainer:
                         to_save = denormalize_img(condition[:, :3])
                         torchvision.utils.save_image(to_save, filepath, nrow=10)
                 each_step = 4e6 if self.current_imsize <= 32 else 2e5
-                if self.global_step//self.batch_size*self.batch_size % (each_step//self.batch_size * self.batch_size) == 0:
+                if self.global_step > self.next_validation_checkpoint:
                     self.save_checkpoint(epoch)
+                    self.next_validation_checkpoint += self.validation_checkpoint_skip
                     self.validate_model()
                 if self.global_step >= (self.latest_switch + self.transition_iters):
                     self.latest_switch += self.transition_iters
