@@ -1,7 +1,7 @@
 import os
 import shutil
 import torch
-from apex.amp import _amp_state
+from apex.amp._amp_state import _amp_state
 
 def to_cuda(elements):
     if torch.cuda.is_available():

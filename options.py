@@ -46,15 +46,7 @@ def print_options(dic):
 
 def check_distributed(options):
     options.world_size = 1
-    if "WORLD_SIZE" in os.environ:
-        options.distributed = int(os.environ["WORLD_SIZE"]) > 1
-    else:
-        options.distributed = False
-    if options.distributed:
-        print("Enabling distributed training. Number of GPUs:", os.environ["WORLD_SIZE"])
-        torch.cuda.set_device(options.local_rank)
-        torch.distributed.init_process_group(backend="nccl", init_method="env://")
-        options.world_size = torch.distributed.get_world_size()
+    options.distributed = False
 
 
 def load_options():

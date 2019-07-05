@@ -14,8 +14,8 @@ class WSConv2d(nn.Module):
         self.conv = nn.Conv2d(in_channels=inCh, out_channels=outCh, kernel_size=kernelSize, stride=1, padding=padding)
 
         # new bias to use after wscale
-        self.bias = self.conv.bias
-        self.bias = nn.Parameter(self.bias.view(1, self.bias.shape[0], 1, 1))
+        bias = self.conv.bias
+        self.bias = nn.Parameter(bias.view(1, bias.shape[0], 1, 1))
         self.conv.bias = None
         
         # calc wt scale
