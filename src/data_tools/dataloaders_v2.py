@@ -1,27 +1,27 @@
 import torch
 import os
-import utils
+import src.utils
 import glob
 import numpy as np
 from torchvision import transforms
-from data_tools.data_samplers import ValidationSampler, TrainSampler
-
+from src.data_tools.data_samplers import ValidationSampler, TrainSampler
+from src.data_tools.data_utils import DataPrefetcher
 MAX_VALIDATION_SIZE = 50000
 
-def load_dataset(dataset, batch_size, imsize, full_validation, load_fraction=False):
+def load_dataset(dataset, batch_size, imsize, full_validation, pose_size, load_fraction=False):
     if dataset == "celeba":
         raise NotImplementedError
     if dataset == "ffhq":
         raise NotImplementedError
     if dataset == "yfcc100m":
         dirpath = os.path.join("data", "yfcc100m_torch")
-        return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction)
+        return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
     if dataset == "yfcc100m128":
         dirpath = os.path.join("data", "yfcc100m128_torch")
-        return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction)
+        return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
     if dataset == "yfcc100m128v2":
         dirpath = os.path.join("data", "yfcc100m128_torch_v2")
-        return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction)
+        return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
     raise AssertionError("Dataset was incorrect", dataset)
 
 
@@ -40,10 +40,10 @@ class DeepPrivacyDataset(torch.utils.data.Dataset):
         assert self.images.shape[1:] == expected_imshape, "Shape was: {}. Expected: {}".format(
             self.images.shape[1:], expected_imshape)
         print("Dataset loaded. Number of samples:", self.images.shape)
+        self.images = [transforms.functional.to_pil_image(im) for im in self.images]
 
     def __getitem__(self, index):
         im = self.images[index]
-        im = transforms.functional.to_pil_image(im)
         landmarks = self.landmarks[index].clone()
         bbox = self.bounding_boxes[index].clone()
         if self.augment_data:
@@ -61,7 +61,7 @@ class DeepPrivacyDataset(torch.utils.data.Dataset):
         return im, condition, landmarks
 
     def __len__(self):
-        return self.images.shape[0]
+        return len(self.images)
 
 
 def fast_collate(batch):
@@ -118,7 +118,7 @@ def load_dataset_files(dirpath, imsize, load_fraction):
     return images, bounding_boxes, landmarks
 
 
-def _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction):
+def _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size):
     images, bounding_boxes, landmarks = load_dataset_files(dirpath, imsize, load_fraction)
     if full_validation:
         validation_size = MAX_VALIDATION_SIZE#int(0.02*len(images))
@@ -152,6 +152,8 @@ def _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction):
                                                  drop_last=True,
                                                  pin_memory=True,
                                                  collate_fn=fast_collate)
+    dataloader_train = DataPrefetcher(dataloader_train, pose_size)
+    dataloader_val = DataPrefetcher(dataloader_val, pose_size)
     return dataloader_train, dataloader_val
 
 

@@ -2,8 +2,8 @@ import os
 import shutil
 import torch
 from apex.amp._amp_state import _amp_state
-from models.discriminator import Discriminator, DeepDiscriminator
-from models.generator import Generator
+from src.models.discriminator import Discriminator, DeepDiscriminator
+from src.models.generator import Generator
 
 def to_cuda(elements):
     if torch.cuda.is_available():
@@ -162,3 +162,9 @@ def wrap_models(models):
     if isinstance(models, tuple) or isinstance(models, list):
         return [NetworkWrapper(x) for x in models]
     return NetworkWrapper(models)
+
+def compute_transition_value(global_step, is_transitioning, transition_iters):
+    transition_variable = 1
+    if is_transitioning:
+        transition_variable = ( (global_step-1) % transition_iters) / transition_iters
+    return transition_variable

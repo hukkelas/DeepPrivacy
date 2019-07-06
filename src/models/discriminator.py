@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
-from models.custom_layers import WSConv2d, WSLinear
-from models.utils import generate_pose_channel_images, get_transition_value
-from models.base_model import ProgressiveBaseModel
+from src.models.custom_layers import WSConv2d, WSLinear
+from src.models.utils import generate_pose_channel_images, get_transition_value
+from src.models.base_model import ProgressiveBaseModel
 
 def conv_module_bn(dim_in, dim_out, kernel_size, padding):
     return nn.Sequential(

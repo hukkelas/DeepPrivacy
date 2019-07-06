@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
-from models.custom_layers import PixelwiseNormalization, WSConv2d, UpSamplingBlock
-from models.utils import generate_pose_channel_images, get_transition_value
-from models.base_model import ProgressiveBaseModel
+from src.models.custom_layers import PixelwiseNormalization, WSConv2d, UpSamplingBlock
+from src.models.utils import generate_pose_channel_images, get_transition_value
+from src.models.base_model import ProgressiveBaseModel
 
 def conv_bn_relu(in_dim, out_dim, kernel_size, padding=0):
     return nn.Sequential(

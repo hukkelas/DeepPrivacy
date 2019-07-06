@@ -6,8 +6,8 @@ sys.path.append("/workspace")
 print(sys.path)
 import os
 from apex import amp
-from train import NetworkWrapper, init_model, gradient_penalty
-from utils import gather_tensor
+from src.train import NetworkWrapper, init_model, gradient_penalty
+from src.utils import gather_tensor
 from torch.optim import Adam
 parser = argparse.ArgumentParser()
 

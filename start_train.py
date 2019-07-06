@@ -10,6 +10,7 @@ except Exception:
     num_gpus = len(gpu_id.split(","))
 
 options = " ".join(sys.argv[2:])
+
 model_name = sys.argv[2].split("/")[-2]
 #model_index = sys.argv.index("--model")
 
@@ -22,7 +23,7 @@ distributed_command = "" #if num_gpus <= 1 else "-m torch.distributed.launch --n
 command = "nvidia-docker run --name {} \
         -v /dev/log:/home/haakohu/DeepPrivacy/log -u 1174424 -v {}:/workspace -v /raid/userdata/haakohu/deep_privacy/data:/workspace/data \
            -e CUDA_VISIBLE_DEVICES={}  --log-opt max-size=50m\
-           haakohu/pytorch0.4.1 python {} src/train.py {}".format(
+           haakohu/pytorch0.4.1 python {} -m src.train.py {}".format(
             docker_container,
             filedir,
             gpu_id,

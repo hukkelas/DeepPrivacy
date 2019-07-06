@@ -1,6 +1,6 @@
-from models.discriminator import Discriminator
-from models.generator import Generator
-from utils import wrap_models
+from src.models.discriminator import Discriminator
+from src.models.generator import Generator
+from src.utils import wrap_models
 
 
 def init_model(pose_size, start_channel_dim, image_channels, discriminator_model):

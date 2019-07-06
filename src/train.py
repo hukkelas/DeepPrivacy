@@ -4,17 +4,17 @@ import numpy as np
 import torch
 from apex import amp
 import torchvision
-import utils
-from utils import load_checkpoint, save_checkpoint, to_cuda, amp_state_has_overflow, wrap_models
-from models.generator import Generator
-from models.unet_model import init_model
-from data_tools.dataloaders_v2 import load_dataset
-import config_parser
-from metrics import fid
+from src import utils
+from src.utils import load_checkpoint, save_checkpoint, to_cuda, amp_state_has_overflow, wrap_models
+from src.models.generator import Generator
+from src.models.unet_model import init_model
+from src.data_tools.dataloaders_v2 import load_dataset
+from src import config_parser
+from src.metrics import fid
 import tqdm
 import apex
-from data_tools.data_utils import DataPrefetcher, denormalize_img
-import logger 
+from src.data_tools.data_utils import denormalize_img
+from src import logger 
 
 if False:
     torch.manual_seed(0)
@@ -122,7 +122,7 @@ class Trainer:
         self.next_validation_checkpoint = self.global_step
 
         self.dataloader_train, self.dataloader_val = load_dataset(
-            self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.load_fraction_of_dataset)
+            self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.pose_size, self.load_fraction_of_dataset)
 
     def save_checkpoint(self, filepath=None):
         if filepath is None:
@@ -235,8 +235,8 @@ class Trainer:
             num_losses=4)
 
     def save_transition_image(self, before):
-        prefetcher = DataPrefetcher(self.dataloader_val, self.transition_variable, self.pose_size)
-        real_image, condition, landmark = prefetcher.next(self.transition_variable)
+        self.dataloader_val.update_next_transition_variable(self.transition_variable)
+        real_image, condition, landmark = next(iter(self.dataloader_val))
 
         fake_data = self.generator(condition, landmark)
         fake_data = denormalize_img(fake_data.detach())[:8]
@@ -247,7 +247,6 @@ class Trainer:
         imsize = self.current_imsize if before else self.current_imsize // 2
         imname = "transition/{}_{}".format(tag, imsize)
         self.logger.save_images(imname, to_save, log_to_writer=False)
-        del prefetcher
 
     def validate_model(self):
         real_scores = []
@@ -264,14 +263,11 @@ class Trainer:
                                    3,
                                    self.current_imsize,
                                    self.current_imsize))
-        data_prefetcher = DataPrefetcher(self.dataloader_val,
-                                         self.transition_variable,
-                                         self.pose_size)
         with torch.no_grad():
-            for idx in tqdm.trange(len(self.dataloader_val), desc="Validating model!"):
-                real_data, condition, landmarks = data_prefetcher.next(self.transition_variable)
+            self.dataloader_val.update_next_transition_variable(self.transition_variable)
+            for idx, (real_data, condition, landmarks) in enumerate(tqdm.tqdm(self.dataloader_val, desc="Validating model!")):
                 fake_data = self.running_average_generator(condition,
-                                                        landmarks)
+                                                           landmarks)
                 real_score = self.discriminator(real_data, condition, landmarks)
                 fake_score = self.discriminator(fake_data.detach(), condition,
                                                 landmarks)
@@ -308,7 +304,6 @@ class Trainer:
         self.logger.save_images("fakes", fake_images[:64], log_to_validation=True)
         self.discriminator.train()
         self.generator.train()
-        del data_prefetcher
 
     def log_loss_scales(self):
         for loss_idx, loss_scaler in enumerate(amp._amp_state.loss_scalers):
@@ -364,13 +359,12 @@ class Trainer:
         return wasserstein_distance.mean().detach(), gradient_pen.mean().detach(), real_scores.mean().detach(), fake_scores.mean().detach(), epsilon_penalty.mean().detach()
 
     def update_transition_value(self):
-        self.transition_variable = 1
-        if self.is_transitioning:
-            self.transition_variable = (
-                (self.global_step-1) % self.transition_iters) / self.transition_iters
-            self.discriminator.update_transition_value(self.transition_variable)
-            self.generator.update_transition_value(self.transition_variable)
-            self.running_average_generator.update_transition_value(self.transition_variable)
+        self.transition_variable = utils.compute_transition_value(
+            self.global_step, self.is_transitioning, self.transition_iters
+        )
+        self.discriminator.update_transition_value(self.transition_variable)
+        self.generator.update_transition_value(self.transition_variable)
+        self.running_average_generator.update_transition_value(self.transition_variable)
 
 
     def save_validation_checkpoint(self):
@@ -385,17 +379,21 @@ class Trainer:
     def train(self):
         batch_start_time = time.time()
         while True:
-            prefetcher = DataPrefetcher(self.dataloader_train,
-                                        self.transition_variable,
-                                        self.pose_size)
-            for i in range(len(self.dataloader_train)):
+            self.update_transition_value()
+            self.dataloader_train.update_next_transition_variable(self.transition_variable)
+            train_iter = iter(self.dataloader_train)
+            next_transition_value = utils.compute_transition_value(
+                self.global_step + self.batch_size, self.is_transitioning, self.transition_iters
+            )
+            self.dataloader_train.update_next_transition_variable(next_transition_value)
+            for real_data, condition, landmarks in train_iter:
                 self.logger.update_global_step(self.global_step)
                 
                 self.d_optimizer.zero_grad()
                 self.g_optimizer.zero_grad()
                 
                 self.update_transition_value()
-                real_data, condition, landmarks = prefetcher.next(self.transition_variable)
+                #real_data, condition, landmarks = prefetcher.next(self.transition_variable)
                 # Forward G
                 res = self.train_step(real_data,
                                       condition,
@@ -409,7 +407,6 @@ class Trainer:
                 # Log data
                 self.update_running_average_generator()
                 self.save_validation_checkpoint()
-                
                 if self.global_step >= self.next_log_point:
                     
                     time_spent = time.time() - batch_start_time
@@ -438,7 +435,7 @@ class Trainer:
                         self.logger.log_variable(
                             "stats/training_time_minutes", self.total_time)
                     
-                self.global_step += self.batch_size
+                
                 if self.global_step >= self.next_image_save_point:
                     self.next_image_save_point = self.global_step + self.num_ims_per_save_image
                     self.generator.eval()
@@ -473,7 +470,7 @@ class Trainer:
                         self.extend_models()
                         del self.dataloader_train, self.dataloader_val
                         self.dataloader_train, self.dataloader_val = load_dataset(
-                            self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.load_fraction_of_dataset)
+                            self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.pose_size, self.load_fraction_of_dataset)
                         self.is_transitioning = True
 
                         self.init_optimizers()
@@ -488,7 +485,11 @@ class Trainer:
                         
 
                         break
-            self.save_checkpoint()
+                self.global_step += self.batch_size
+                next_transition_value = utils.compute_transition_value(
+                    self.global_step + self.batch_size, self.is_transitioning, self.transition_iters
+                )
+                self.dataloader_train.update_next_transition_variable(next_transition_value)
 
 if __name__ == '__main__':
     config = config_parser.initialize_and_validate_config()

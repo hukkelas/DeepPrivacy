@@ -1,17 +1,17 @@
 import torch
-import utils
-from models.utils import get_transition_value
+from src import utils
+from src.models.utils import get_transition_value
 
 class DataPrefetcher():
 
-    def __init__(self, loader, transition_variable, pose_size):
+    def __init__(self, loader, pose_size):
         self.pool = torch.nn.AvgPool2d(2, 2)
-        self.loader = iter(loader)
+        self.original_loader = loader
         self.stream = torch.cuda.Stream()
-        self.preload(transition_variable)
         self.pose_size = pose_size
+        self.i = 0
 
-    def preload(self, transition_variable):
+    def preload(self):
         try:
             self.next_image, self.next_condition, self.next_landmark = next(self.loader)
         except StopIteration:
@@ -32,18 +32,32 @@ class DataPrefetcher():
 
             self.next_image = interpolate_image(self.pool,
                                                 self.next_image,
-                                                transition_variable)
+                                                self.transition_variable)
             self.next_condition = interpolate_image(self.pool,
                                                     self.next_condition,
-                                                    transition_variable)
+                                                    self.transition_variable)
 
-    def next(self, transition_variable):
+    def __len__(self):
+        return len(self.original_loader)
+
+    def __next__(self):
         torch.cuda.current_stream().wait_stream(self.stream)
         next_image = self.next_image
+        if next_image is None:
+            raise StopIteration
         next_condition = self.next_condition
         next_landmark = self.next_landmark
-        self.preload(transition_variable)
+        self.preload()
         return next_image, next_condition, next_landmark[:, :self.pose_size]
+    
+
+    def __iter__(self):
+        self.loader = iter(self.original_loader)
+        self.preload()
+        return self
+    
+    def update_next_transition_variable(self, transition_variable):
+        self.transition_variable = transition_variable
 
 
 def interpolate_image(pool, images, transition_variable):
