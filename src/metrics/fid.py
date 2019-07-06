@@ -65,17 +65,20 @@ def get_activations(images, batch_size):
     inception_network.eval()
     n_batches = int(np.ceil(num_images  / batch_size))
     inception_activations = np.zeros((num_images, 2048), dtype=np.float32)
-    for batch_idx in trange(n_batches):
-        start_idx = batch_size * batch_idx
-        end_idx = batch_size * (batch_idx + 1)
+    with torch.no_grad():
+        for batch_idx in trange(n_batches):
+            start_idx = batch_size * batch_idx
+            end_idx = batch_size * (batch_idx + 1)
 
-        ims = images[start_idx:end_idx]
-        ims = to_cuda(ims)
-        activations = inception_network(ims)
-        #activations = activations#.detach().cpu().numpy()
-        assert activations.shape == (ims.shape[0], 2048), "Expexted output shape to be: {}, but was: {}".format((ims.shape[0], 2048), activations.shape)
-        
-        inception_activations[start_idx:end_idx, :] = activations.detach().cpu().numpy()
+            ims = images[start_idx:end_idx]
+            ims = to_cuda(ims)
+            activations = inception_network(ims)
+            #activations = activations#.detach().cpu().numpy()
+            assert activations.shape == (ims.shape[0], 2048), "Expexted output shape to be: {}, but was: {}".format((ims.shape[0], 2048), activations.shape)
+            
+            inception_activations[start_idx:end_idx, :] = activations.cpu().numpy()
+    inception_network.cpu()
+    del inception_network
     return inception_activations
 
 

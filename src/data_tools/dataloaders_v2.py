@@ -8,20 +8,20 @@ from data_tools.data_samplers import ValidationSampler, TrainSampler
 
 MAX_VALIDATION_SIZE = 50000
 
-def load_dataset(dataset, batch_size, imsize, full_validation):
+def load_dataset(dataset, batch_size, imsize, full_validation, load_fraction=False):
     if dataset == "celeba":
         raise NotImplementedError
     if dataset == "ffhq":
         raise NotImplementedError
     if dataset == "yfcc100m":
         dirpath = os.path.join("data", "yfcc100m_torch")
-        return _load_dataset(dirpath, imsize, batch_size, full_validation)
+        return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction)
     if dataset == "yfcc100m128":
         dirpath = os.path.join("data", "yfcc100m128_torch")
-        return _load_dataset(dirpath, imsize, batch_size, full_validation)
+        return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction)
     if dataset == "yfcc100m128v2":
         dirpath = os.path.join("data", "yfcc100m128_torch_v2")
-        return _load_dataset(dirpath, imsize, batch_size, full_validation)
+        return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction)
     raise AssertionError("Dataset was incorrect", dataset)
 
 
@@ -79,10 +79,12 @@ def fast_collate(batch):
     return images, conditions, landmarks
 
 
-def load_numpy_files(dirpath):
+def load_numpy_files(dirpath, load_fraction):
     images = []
     files = glob.glob(os.path.join(dirpath, "*.npy"))
     files.sort(key=lambda x: int(os.path.basename(x).split(".")[0]))
+    if load_fraction:
+        files = files[:1000]
     assert len(files) > 0, "Empty directory: " + dirpath
     for fpath in files:
         assert os.path.isfile(fpath), "Is not file: " + fpath
@@ -97,8 +99,8 @@ def load_ffhq_condition(batch_size, imsize=128):
     return ConditionedCelebADataset("data/ffhq_torch", imsize, batch_size, landmarks_total=False)
 
 
-def load_dataset_files(dirpath, imsize):
-    images = load_numpy_files(os.path.join(dirpath, "original", str(imsize)))
+def load_dataset_files(dirpath, imsize, load_fraction):
+    images = load_numpy_files(os.path.join(dirpath, "original", str(imsize)), load_fraction)
     bounding_box_filepath = os.path.join(
         dirpath, "bounding_box", "{}.torch".format(imsize))
     assert os.path.isfile(bounding_box_filepath), "Did not find the bounding box data. Looked in: {}".format(
@@ -110,12 +112,14 @@ def load_dataset_files(dirpath, imsize):
     assert os.path.isfile(
         landmark_filepath), "Did not find the landmark data. Looked in: {}".format(landmark_filepath)
     landmarks = torch.load(landmark_filepath).float() / imsize
-
+    if load_fraction:
+        bounding_boxes = bounding_boxes[:len(images)]
+        landmarks = landmarks[:len(images)]
     return images, bounding_boxes, landmarks
 
 
-def _load_dataset(dirpath, imsize, batch_size, full_validation):
-    images, bounding_boxes, landmarks = load_dataset_files(dirpath, imsize)
+def _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction):
+    images, bounding_boxes, landmarks = load_dataset_files(dirpath, imsize, load_fraction)
     if full_validation:
         validation_size = MAX_VALIDATION_SIZE#int(0.02*len(images))
     else:

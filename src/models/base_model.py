@@ -15,6 +15,7 @@ class ProgressiveBaseModel(nn.Module):
             start_channel_size//16,
             start_channel_size//32,
         ]
+        self.transition_channels = [x // 8 * 8 for x in self.transition_channels]
         self.image_channels = image_channels
         self.transition_value = 1.0
         self.num_poses = pose_size // 2

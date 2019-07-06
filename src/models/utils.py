@@ -8,7 +8,7 @@ pose_indexes = {
 
 }
 def get_transition_value(x_old, x_new, transition_variable):
-    assert x_old.shape == x_new.shape
+    assert x_old.shape == x_new.shape, "Old shape: {}, New: {}".format(x_old.shape, x_new.shape)
     return torch.lerp(x_old, x_new, transition_variable)
 
 

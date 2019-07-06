@@ -132,9 +132,12 @@ class NetworkWrapper(torch.nn.Module):
     def __init__(self, network):
         super().__init__()
         self.network = network
-        self.forward_block = torch.nn.DataParallel(
-            self.network
-        )
+        if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+            self.forward_block = torch.nn.DataParallel(
+                self.network
+            )
+        else:
+            self.forward_block = self.network
 
     def forward(self, *inputs):
         return self.forward_block(*inputs)

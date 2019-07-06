@@ -48,7 +48,7 @@ def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks, 
         inputs=x_hat,
         grad_outputs=torch.ones(logits.shape).to(fake_data.dtype).to(fake_data.device),
         create_graph=True
-    )[0] #.view(x_hat.shape[0], -1)
+    )[0] 
     grad = grad.view(x_hat.shape[0], -1)
     if check_overflow(grad):
         print("Overflow in gradient penalty calculation.")
@@ -74,6 +74,7 @@ class Trainer:
         self.pose_size = config.models.pose_size
         self.discriminator_model = config.models.discriminator.structure
         self.full_validation = config.use_full_validation
+        self.load_fraction_of_dataset = config.load_fraction_of_dataset
 
         # Image settings
         self.current_imsize = 4
@@ -121,7 +122,7 @@ class Trainer:
         self.next_validation_checkpoint = self.global_step
 
         self.dataloader_train, self.dataloader_val = load_dataset(
-            self.dataset, self.batch_size, self.current_imsize, self.full_validation)
+            self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.load_fraction_of_dataset)
 
     def save_checkpoint(self, filepath=None):
         if filepath is None:
@@ -182,6 +183,7 @@ class Trainer:
                                                    self.start_channel_size,
                                                    self.image_channels)
         self.running_average_generator = wrap_models(self.running_average_generator)
+        to_cuda(self.running_average_generator)
         self.running_average_generator = amp.initialize(self.running_average_generator,
                                                         None, opt_level=self.opt_level)
         
@@ -286,7 +288,7 @@ class Trainer:
                 start_idx = idx*self.batch_size
                 end_idx = (idx+1)*self.batch_size
                 real_images[start_idx:end_idx] = real_data.cpu().float()
-                fake_images[start_idx:end_idx] = fake_data.detach().cpu().float()
+                fake_images[start_idx:end_idx] = fake_data.cpu().float()
                 del real_data, fake_data, real_score, fake_score, wasserstein_distance, epsilon_penalty
         to_nhwc = lambda x: np.stack((x[:,0], x[:, 1], x[:, 2]), axis=3)
         fid_name = "{}_{}_{}".format(self.dataset, self.full_validation, self.current_imsize)
@@ -331,7 +333,7 @@ class Trainer:
         assert epsilon_penalty.shape == gradient_pen.shape
         assert wasserstein_distance.shape == epsilon_penalty.shape
         D_loss = - wasserstein_distance
-        D_loss += gradient_pen * 10 + epsilon_penalty * 0.001
+        D_loss = D_loss + gradient_pen * 10 + epsilon_penalty * 0.001
 
         D_loss = D_loss.mean()
         self.d_optimizer.zero_grad()
@@ -471,7 +473,7 @@ class Trainer:
                         self.extend_models()
                         del self.dataloader_train, self.dataloader_val
                         self.dataloader_train, self.dataloader_val = load_dataset(
-                            self.dataset, self.batch_size, self.current_imsize, self.full_validation)
+                            self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.load_fraction_of_dataset)
                         self.is_transitioning = True
 
                         self.init_optimizers()

@@ -53,11 +53,10 @@ class Discriminator(ProgressiveBaseModel):
         )
         self.core_model = self.core_model
         self.output_layer = WSLinear(start_channel_dim, 1)
-        self.prev_channel_dim = start_channel_dim
 
     def extend(self):
-        input_dim = self.transition_channels[self.transition_step]
-        output_dim = self.prev_channel_dim
+        input_dim = self.transition_channels[self.transition_step] 
+        output_dim = self.prev_channel_extension
         if self.transition_step != 0:
             self.core_model = nn.Sequential(
                 self.new_block,
@@ -127,7 +126,7 @@ class DeepDiscriminator(nn.Module):
 
     def extend(self):
         input_dim = self.transition_channels[self.transition_step]
-        output_dim = self.prev_channel_dim
+        output_dim = self.prev_channel_extension
         if self.transition_step != 0:
             self.core_model = nn.Sequential(
                 self.new_block,

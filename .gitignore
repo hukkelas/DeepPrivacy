@@ -25,3 +25,4 @@ scripts/debug
 .results
 *.ckpt
 *.pth
+models/old
