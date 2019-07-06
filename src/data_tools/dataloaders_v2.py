@@ -4,24 +4,24 @@ import utils
 import glob
 import numpy as np
 from torchvision import transforms
-from data_sampelrs import ValidationSampler, TrainSampler
+from data_tools.data_samplers import ValidationSampler, TrainSampler
 
 MAX_VALIDATION_SIZE = 50000
 
-def load_dataset(dataset, batch_size, imsize, distributed, full_validation):
+def load_dataset(dataset, batch_size, imsize, full_validation):
     if dataset == "celeba":
         raise NotImplementedError
     if dataset == "ffhq":
         raise NotImplementedError
     if dataset == "yfcc100m":
         dirpath = os.path.join("data", "yfcc100m_torch")
-        return _load_dataset(dirpath, imsize, batch_size, distributed, full_validation)
+        return _load_dataset(dirpath, imsize, batch_size, full_validation)
     if dataset == "yfcc100m128":
         dirpath = os.path.join("data", "yfcc100m128_torch")
-        return _load_dataset(dirpath, imsize, batch_size, distributed, full_validation)
+        return _load_dataset(dirpath, imsize, batch_size, full_validation)
     if dataset == "yfcc100m128v2":
         dirpath = os.path.join("data", "yfcc100m128_torch_v2")
-        return _load_dataset(dirpath, imsize, batch_size, distributed, full_validation)
+        return _load_dataset(dirpath, imsize, batch_size, full_validation)
     raise AssertionError("Dataset was incorrect", dataset)
 
 
@@ -114,7 +114,7 @@ def load_dataset_files(dirpath, imsize):
     return images, bounding_boxes, landmarks
 
 
-def _load_dataset(dirpath, imsize, batch_size, distributed, full_validation):
+def _load_dataset(dirpath, imsize, batch_size, full_validation):
     images, bounding_boxes, landmarks = load_dataset_files(dirpath, imsize)
     if full_validation:
         validation_size = MAX_VALIDATION_SIZE#int(0.02*len(images))

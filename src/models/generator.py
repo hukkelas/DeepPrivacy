@@ -1,0 +1,167 @@
+import torch
+import torch.nn as nn
+from utils import to_cuda
+from utils import get_transition_value
+from models.custom_layers import PixelwiseNormalization, WSConv2d, UpSamplingBlock
+from models.utils import generate_pose_channel_images
+
+def conv_bn_relu(in_dim, out_dim, kernel_size, padding=0):
+    return nn.Sequential(
+        WSConv2d(in_dim, out_dim, kernel_size, padding),
+        nn.LeakyReLU(negative_slope=.2),
+        PixelwiseNormalization()
+    )
+
+class UnetDownSamplingBlock(nn.Module):
+
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.model = nn.Sequential(
+            conv_bn_relu(in_dim, out_dim, 3, 1),
+            conv_bn_relu(out_dim, out_dim, 3, 1),
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class UnetUpsamplingBlock(nn.Module):
+
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.model = nn.Sequential(
+            conv_bn_relu(in_dim, out_dim, 3, 1),
+            conv_bn_relu(out_dim, out_dim, 3, 1)
+        )
+
+    def forward(self, x):
+        x = self.model(x)
+        return x
+
+class Generator(nn.Module):
+
+    def __init__(self,
+                 pose_size,
+                 start_channel_dim,
+                 image_channels):
+        super().__init__()
+        # Transition blockss
+        self.orig_start_channel_dim = start_channel_dim
+        self.image_channels = image_channels
+        self.transition_value = 1.0
+        self.num_poses = pose_size // 2
+        self.to_rgb_new = WSConv2d(start_channel_dim, self.image_channels, 1, 0)
+        self.to_rgb_old = WSConv2d(start_channel_dim, self.image_channels, 1, 0)
+
+        self.core_blocks_down = nn.ModuleList([
+            UnetDownSamplingBlock(start_channel_dim, start_channel_dim)
+        ])
+        self.core_blocks_up = nn.ModuleList([
+            nn.Sequential(
+                conv_bn_relu(start_channel_dim+self.num_poses, start_channel_dim, 1, 0),
+                UnetUpsamplingBlock(start_channel_dim, start_channel_dim)
+            )
+            
+        ])
+
+        self.new_up = nn.Sequential()
+        self.old_up = nn.Sequential()
+        self.new_down = nn.Sequential()
+        self.from_rgb_new = conv_bn_relu(self.image_channels, start_channel_dim, 1, 0)
+        self.from_rgb_old =  conv_bn_relu(self.image_channels, start_channel_dim, 1, 0)
+        self.current_imsize = 4
+        self.upsampling = UpSamplingBlock()
+        self.prev_channel_size = start_channel_dim
+        self.downsampling = nn.AvgPool2d(2)
+        self.extension_channels = []
+
+    def extend(self, output_dim):
+        print("extending G", output_dim)
+        # Downsampling module
+        self.extension_channels.append(output_dim)
+        self.current_imsize *= 2
+
+        self.from_rgb_old = nn.Sequential(
+            nn.AvgPool2d([2, 2]),
+            self.from_rgb_new
+        )
+        if self.current_imsize == 8:
+            core_block_up = nn.Sequential(
+                self.core_blocks_up[0],
+                UpSamplingBlock()
+            )
+            self.core_blocks_up = nn.ModuleList([core_block_up])
+        else:
+            core_blocks_down = nn.ModuleList()
+
+            core_blocks_down.append(self.new_down)
+            first = [nn.AvgPool2d(2)] + list(self.core_blocks_down[0].children())
+            core_blocks_down.append(nn.Sequential(*first))
+            core_blocks_down.extend(self.core_blocks_down[1:])
+
+            self.core_blocks_down = core_blocks_down
+            new_up_blocks = list(self.new_up.children()) + [UpSamplingBlock()]
+            self.new_up = nn.Sequential(*new_up_blocks)
+            self.core_blocks_up.append(self.new_up)
+
+        self.from_rgb_new =  conv_bn_relu(self.image_channels, output_dim, 1, 0)
+        self.new_down = nn.Sequential(
+            UnetDownSamplingBlock(output_dim, self.prev_channel_size)
+        )
+        self.new_down = self.new_down
+        # Upsampling modules
+        self.to_rgb_old = self.to_rgb_new
+        self.to_rgb_new = WSConv2d(output_dim, self.image_channels, 1, 0)
+
+        self.new_up = nn.Sequential(
+            conv_bn_relu(self.prev_channel_size*2+self.num_poses, self.prev_channel_size, 1, 0),
+            UnetUpsamplingBlock(self.prev_channel_size, output_dim)
+        )
+        self.prev_channel_size = output_dim
+
+    def new_parameters(self):
+        new_paramters = list(self.new_down.parameters()) + list(self.to_rgb_new.parameters())
+        new_paramters += list(self.new_up.parameters()) + list(self.from_rgb_new.parameters())
+        return new_paramters
+
+    def forward(self, x_in, pose_info):
+        #z = torch.randn(x_in.shape[0], 1, *x_in.shape[2:], device=x_in.device, dtype=x_in.dtype)
+        #x_in = torch.cat((x_in, z), dim=1)
+        unet_skips = []
+        if self.current_imsize != 4:
+            old_down = self.from_rgb_old(x_in)
+            new_down = self.from_rgb_new(x_in)
+            new_down = self.new_down(new_down)
+            unet_skips.append(new_down)
+            new_down = self.downsampling(new_down)
+            x = get_transition_value(old_down, new_down, self.transition_value)
+        else:
+            x = self.from_rgb_new(x_in)
+
+        for block in self.core_blocks_down[:-1]:
+            x = block(x)
+            unet_skips.append(x)
+        x = self.core_blocks_down[-1](x)
+        pose_channels = generate_pose_channel_images(4,
+                                                     self.current_imsize, 
+                                                     x_in.device,
+                                                     pose_info,
+                                                     x_in.dtype)
+        x = torch.cat((x, pose_channels[0]), dim=1)
+        x = self.core_blocks_up[0](x)
+
+        for idx, block in enumerate(self.core_blocks_up[1:]):
+            skip_x = unet_skips[-idx-1]
+            assert skip_x.shape == x.shape, "IDX: {}, skip_x: {}, x: {}".format(idx, skip_x.shape, x.shape)
+            x = torch.cat((x, skip_x, pose_channels[idx+1]), dim=1)
+            x = block(x)
+
+        if self.current_imsize == 4:
+            x = self.to_rgb_new(x)
+            return x
+        x_old = self.to_rgb_old(x)
+        x = torch.cat((x, unet_skips[0], pose_channels[-1]), dim=1)
+        x_new = self.new_up(x)
+        x_new = self.to_rgb_new(x_new)
+        x = get_transition_value(x_old, x_new, self.transition_value)
+        return x

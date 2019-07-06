@@ -1,4 +1,3 @@
-from utils import is_distributed
 import torch
 import math 
 # Rerference implementation: https://pytorch.org/docs/stable/_modules/torch/utils/data/distributed.html
@@ -7,12 +6,8 @@ import math
 class BaseSampler(torch.utils.data.Sampler):
 
     def __init__(self, dataset):
-        if is_distributed():
-            num_replicas = torch.distributed.get_world_size()
-            rank = torch.distributed.get_rank()
-        else:
-            num_replicas = 1
-            rank = 0
+        num_replicas = 1
+        rank = 0
         self.dataset = dataset
         self.num_replicas = num_replicas
         self.rank = rank
