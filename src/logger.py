@@ -19,7 +19,8 @@ class Logger:
         self.image_dir = generated_data_dir
 
         os.makedirs(self.image_dir, exist_ok=True)
-        os.makedirs(os.path.join(self.image_dir, "validation"))
+        os.makedirs(os.path.join(self.image_dir, "validation"), exist_ok=True)
+        os.makedirs(os.path.join(self.image_dir, "transition"), exist_ok=True)
 
     
     def update_global_step(self, global_step):
@@ -34,14 +35,13 @@ class Logger:
         else:
             self.writer.add_scalar(tag, value, global_step=self.global_step)
         
-        def save_images(writer, images, global_step, directory):
     
     def save_images(self, tag, images, log_to_validation=False, log_to_writer=True):
         imsize = images.shape[2]
         image_dir = self.image_dir
         if log_to_validation:
             image_dir = os.path.join(self.image_dir, "validation")
-        filename = "{}{0}_{1}x{1}.jpg".format(tag, self.global_step, imsize)
+        filename = "{0}{1}_{2}x{2}.jpg".format(tag, self.global_step, imsize)
         
         filepath = os.path.join(image_dir, filename)
         torchvision.utils.save_image(images, filepath, nrow=10)

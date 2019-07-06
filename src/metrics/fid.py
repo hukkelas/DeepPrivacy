@@ -7,7 +7,6 @@ import numpy as np
 import glob
 import os
 from scipy import linalg
-from utils import is_distributed, gather_tensor
 from utils import to_cuda
 
 
@@ -65,11 +64,7 @@ def get_activations(images, batch_size):
     inception_network = to_cuda(inception_network)
     inception_network.eval()
     n_batches = int(np.ceil(num_images  / batch_size))
-    if is_distributed():
-
-        inception_activations = np.zeros((num_images * torch.distributed.get_world_size(), 2048), dtype=np.float32)
-    else:
-        inception_activations = np.zeros((num_images, 2048), dtype=np.float32)
+    inception_activations = np.zeros((num_images, 2048), dtype=np.float32)
     for batch_idx in trange(n_batches):
         start_idx = batch_size * batch_idx
         end_idx = batch_size * (batch_idx + 1)
@@ -79,10 +74,6 @@ def get_activations(images, batch_size):
         activations = inception_network(ims)
         #activations = activations#.detach().cpu().numpy()
         assert activations.shape == (ims.shape[0], 2048), "Expexted output shape to be: {}, but was: {}".format((ims.shape[0], 2048), activations.shape)
-        if is_distributed():
-            activations = gather_tensor(activations)
-            start_idx = batch_idx * batch_size * torch.distributed.get_world_size()
-            end_idx = start_idx + batch_size * torch.distributed.get_world_size()
         
         inception_activations[start_idx:end_idx, :] = activations.detach().cpu().numpy()
     return inception_activations

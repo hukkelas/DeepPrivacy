@@ -5,9 +5,10 @@ import torch
 from apex import amp
 import torchvision
 import utils
-from utils import load_checkpoint, save_checkpoint, to_cuda, amp_state_has_overflow
-from unet_model import Generator, Discriminator, DeepDiscriminator
-from dataloaders_v2 import load_dataset
+from utils import load_checkpoint, save_checkpoint, to_cuda, amp_state_has_overflow, wrap_models
+from models.generator import Generator
+from models.unet_model import init_model
+from data_tools.dataloaders_v2 import load_dataset
 import config_parser
 from metrics import fid
 import tqdm
@@ -24,8 +25,6 @@ if False:
 else:
     torch.backends.cudnn.benchmark = True
 
-def isnan(x):
-    return x != x
 
 def check_overflow(grad):
     cpu_sum = float(grad.float().sum())
@@ -62,71 +61,7 @@ def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks, 
     return grad_penalty.to(fake_data.dtype)
 
 
-class NetworkWrapper(torch.nn.Module):
 
-    def __init__(self, network):
-        super().__init__()
-        self.network = network
-        self.forward_block = to_cuda(self.network)
-
-    def forward(self, *inputs):
-        return self.forward_block(*inputs)
-
-    def extend(self, channel_size):
-        del self.forward_block
-        if type(self.network) == Discriminator:
-            network = Discriminator(self.network.image_channels,
-                                    self.network.orig_start_channel_dim,
-                                    self.network.num_poses*2)
-        elif type(self.network) == DeepDiscriminator:
-            network = DeepDiscriminator(self.network.image_channels,
-                                    self.network.orig_start_channel_dim,
-                                    self.network.num_poses*2)
-        else:
-            network = Generator(self.network.num_poses*2,
-                                self.network.orig_start_channel_dim,
-                                self.network.image_channels)
-        for c in self.network.extension_channels:
-            network.extend(c)
-        network.load_state_dict(self.network.state_dict())
-        network.extend(channel_size)
-        del self.network
-        self.network = network
-        self.forward_block = torch.nn.DataParallel(
-            self.network,
-            device_ids=list(range(torch.cuda.device_count()))
-        )
-        
-    def update_transition_value(self, value):
-        self.network.transition_value = value
-
-    def new_parameters(self):
-        return self.network.new_parameters()
-
-    def state_dict(self):
-        return self.network.state_dict()
-    
-    def load_state_dict(self, dict):
-        self.network.load_state_dict(dict)
-
-def init_model(pose_size, start_channel_dim, image_channels, discriminator_model):
-    if discriminator_model == "deep":
-        d = DeepDiscriminator
-    else:
-        assert discriminator_model == "normal"
-        d = Discriminator
-
-    discriminator = d(image_channels,
-                      start_channel_dim,
-                      pose_size)
-    generator = Generator(pose_size, start_channel_dim, image_channels)
-    discriminator, generator = wrap_models([discriminator, generator])
-    return discriminator, generator
-
-def wrap_models(models):
-    if isinstance(models, tuple) or isinstance(models, list):
-        return [NetworkWrapper(x) for x in models]
-    return NetworkWrapper(models)
 
 class Trainer:
 
@@ -158,28 +93,19 @@ class Trainer:
         self.start_channel_size = config.models.start_channel_size
         self.latest_switch = 0
         self.opt_level = config.train_config.amp_opt_level
-        self.transition_channels = [
-            config.start_channel_size,
-            config.start_channel_size,
-            config.start_channel_size,
-            config.start_channel_size//2,
-            config.start_channel_size//4,
-            config.start_channel_size//8,
-            config.start_channel_size//16,
-            config.start_channel_size//32,
-        ]
         self.start_time = time.time()
-        if not self.load_checkpoint():
-            self.discriminator, self.generator = init_model(self.pose_size,
+        self.discriminator, self.generator = init_model(self.pose_size,
                                                             config.models.start_channel_size,
                                                             self.image_channels,
                                                             self.discriminator_model)
-            self.init_running_average_generator()
+        self.init_running_average_generator()
+        if not self.load_checkpoint():
             self.extend_models()
             self.init_optimizers()
         
         self.logger = logger.Logger(config.summaries_dir, config.generated_data_dir)
 
+        self.batch_size = self.batch_size_schedule[self.current_imsize]
         self.logger.log_variable("stats/batch_size", self.batch_size)
 
         if self.opt_level == "O0":
@@ -194,7 +120,6 @@ class Trainer:
         self.num_ims_per_checkpoint = config.logging.num_ims_per_checkpoint
         self.next_validation_checkpoint = self.global_step
 
-        self.batch_size = self.batch_size_schedule[self.current_imsize]
         self.dataloader_train, self.dataloader_val = load_dataset(
             self.dataset, self.batch_size, self.current_imsize, self.full_validation)
 
@@ -213,6 +138,8 @@ class Trainer:
             "total_time": self.total_time,
             "running_average_generator": self.running_average_generator.state_dict(),
             "latest_switch": self.latest_switch,
+            "current_imsize": self.current_imsize,
+            "transition_step": self.transition_step
         }
         save_checkpoint(state_dict,
                         filepath,
@@ -222,26 +149,25 @@ class Trainer:
         try:
             map_location = "cuda:0" if torch.cuda.is_available() else "cpu"
             ckpt = load_checkpoint(self.checkpoint_dir, map_location=map_location)
-            #print_options(ckpt)
-
             # Transition settings
             self.is_transitioning = ckpt["is_transitioning"]
+            self.transition_step = ckpt["transition_step"]
+            self.current_imsize = ckpt["current_imsize"]
             self.latest_switch = ckpt["latest_switch"]
+            
+            # Tracking stats
             self.global_step = ckpt["global_step"]
             self.start_time = time.time() - ckpt["total_time"] * 60
-            self.discriminator, self.generator = init_model(
-                self.pose_size, current_channels,
-                self.image_channels,
-                self.discriminator_model)
-            self.init_running_average_generator()
-            num_transitions = ckpt["transition_step"]
-            self.transition_step = 0
-            for i in range(num_transitions):
-                self.extend_models()
+            
+            # Models
             self.discriminator.load_state_dict(ckpt['D'])
+
             self.generator.load_state_dict(ckpt['G'])
             self.running_average_generator.load_state_dict(
                 ckpt["running_average_generator"])
+            to_cuda([self.generator, self.discriminator, self.running_average_generator])
+            self.running_average_generator = amp.initialize(self.running_average_generator,
+                                                            None, opt_level=self.opt_level)
             self.init_optimizers()
             self.d_optimizer.load_state_dict(ckpt['d_optimizer'])
             self.g_optimizer.load_state_dict(ckpt['g_optimizer'])
@@ -255,28 +181,26 @@ class Trainer:
         self.running_average_generator = Generator(self.pose_size,
                                                    self.start_channel_size,
                                                    self.image_channels)
-        self.running_average_generator = to_cuda(self.running_average_generator)
+        self.running_average_generator = wrap_models(self.running_average_generator)
         self.running_average_generator = amp.initialize(self.running_average_generator,
                                                         None, opt_level=self.opt_level)
-        self.running_average_generator = NetworkWrapper(self.running_average_generator)
+        
 
-    def extend_running_average_generator(self, current_channels):
+    def extend_running_average_generator(self):
         g = self.running_average_generator
-        g.extend(current_channels)
+        g.extend()
         
         for avg_param, cur_param in zip(g.new_parameters(), self.generator.new_parameters()):
             assert avg_param.data.shape == cur_param.data.shape, "AVG param: {}, cur_param: {}".format(avg_param.shape, cur_param.shape)
             avg_param.data = cur_param.data
-        self.running_average_generator = self.running_average_generator.network
-        to_cuda(self.running_average_generator)
+        to_cuda(g)
         self.running_average_generator = amp.initialize(self.running_average_generator, None, opt_level=self.opt_level)
-        self.running_average_generator = NetworkWrapper(self.running_average_generator)
+        
 
     def extend_models(self):
-        current_channels = self.transition_channels[self.transition_step]
-        self.discriminator.extend(current_channels)
-        self.generator.extend(current_channels)
-        self.extend_running_average_generator(current_channels)
+        self.discriminator.extend()
+        self.generator.extend()
+        self.extend_running_average_generator()
 
         self.current_imsize *= 2
 
@@ -287,6 +211,7 @@ class Trainer:
         for avg_parameter, current_parameter in zip(
                 self.running_average_generator.parameters(),
                 self.generator.parameters()):
+            
             avg_parameter.data = self.running_average_generator_decay*avg_parameter + \
                 ((1-self.running_average_generator_decay) * current_parameter.float())
 
@@ -318,7 +243,7 @@ class Trainer:
         to_save = torch.cat((real_data, condition, fake_data))
         tag = "before" if before else "after"
         imsize = self.current_imsize if before else self.current_imsize // 2
-        imname = "transition/{}{}".format(tag, imsize)
+        imname = "transition/{}_{}".format(tag, imsize)
         self.logger.save_images(imname, to_save, log_to_writer=False)
         del prefetcher
 
@@ -487,7 +412,7 @@ class Trainer:
                     
                     time_spent = time.time() - batch_start_time
                     nsec_per_img = time_spent / (self.global_step - self.next_log_point + self.num_ims_per_log) 
-                    self.logger.log_variable("stats/", nsec_per_img)
+                    self.logger.log_variable("stats/nsec_per_img", nsec_per_img)
                     self.next_log_point = self.global_step + self.num_ims_per_log
                     batch_start_time = time.time()
                     self.log_loss_scales()
@@ -541,6 +466,7 @@ class Trainer:
                         self.save_checkpoint()
                     elif self.current_imsize < self.max_imsize:
                         # Save image before transition
+                        self.save_checkpoint()
                         self.save_transition_image(True)
                         self.extend_models()
                         del self.dataloader_train, self.dataloader_val
@@ -557,7 +483,7 @@ class Trainer:
                         
                         # Save image after transition
                         self.save_transition_image(False)
-                        self.save_checkpoint()
+                        
 
                         break
             self.save_checkpoint()

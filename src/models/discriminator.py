@@ -1,10 +1,8 @@
 import torch
 import torch.nn as nn
-from utils import to_cuda
-from utils import get_transition_value
 from models.custom_layers import WSConv2d, WSLinear
-from models.utils import generate_pose_channel_images
-
+from models.utils import generate_pose_channel_images, get_transition_value
+from models.base_model import ProgressiveBaseModel
 
 def conv_module_bn(dim_in, dim_out, kernel_size, padding):
     return nn.Sequential(
@@ -31,24 +29,21 @@ class ResNetBlock(nn.Module):
         return res
 
 
-class Discriminator(nn.Module):
+class Discriminator(ProgressiveBaseModel):
 
     def __init__(self, 
-                 in_channels,
+                 image_channels,
                  start_channel_dim,
                  pose_size
                  ):
         self.orig_start_channel_dim = start_channel_dim
         start_channel_dim = int(start_channel_dim*(2**0.5))
         start_channel_dim = start_channel_dim // 8 * 8
-        super(Discriminator, self).__init__()
+        super().__init__(pose_size, start_channel_dim, image_channels)
         
-        self.num_poses = pose_size // 2
-        self.image_channels = in_channels
-        self.current_imsize = 4
-        self.from_rgb_new = conv_module_bn(in_channels*2, start_channel_dim, 1, 0)
+        self.from_rgb_new = conv_module_bn(image_channels*2, start_channel_dim, 1, 0)
 
-        self.from_rgb_old = conv_module_bn(in_channels*2, start_channel_dim, 1, 0)
+        self.from_rgb_old = conv_module_bn(image_channels*2, start_channel_dim, 1, 0)
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
             nn.Sequential(
@@ -56,19 +51,14 @@ class Discriminator(nn.Module):
                 conv_module_bn(start_channel_dim, start_channel_dim, 4, 0),
             )
         )
-        self.core_model = to_cuda(self.core_model)
+        self.core_model = self.core_model
         self.output_layer = WSLinear(start_channel_dim, 1)
-        self.transition_value = 1.0
         self.prev_channel_dim = start_channel_dim
-        self.extension_channels = []
 
-    def extend(self, input_dim):
-        self.extension_channels.append(input_dim)
-        input_dim = int(input_dim * (2**0.5))
-        input_dim = input_dim//8 * 8 
-        self.current_imsize *= 2
+    def extend(self):
+        input_dim = self.transition_channels[self.transition_step]
         output_dim = self.prev_channel_dim
-        if not self.current_imsize == 8:
+        if self.transition_step != 0:
             self.core_model = nn.Sequential(
                 self.new_block,
                 *self.core_model.children()
@@ -78,14 +68,14 @@ class Discriminator(nn.Module):
             self.from_rgb_new
         )
         self.from_rgb_new = conv_module_bn(self.image_channels*2, input_dim, 1, 0)
-        self.from_rgb_new = to_cuda(self.from_rgb_new)
+        self.from_rgb_new = self.from_rgb_new
         self.new_block = nn.Sequential(
             conv_module_bn(input_dim+self.num_poses, input_dim, 3, 1),
             conv_module_bn(input_dim, output_dim, 3, 1),
             nn.AvgPool2d([2, 2])
         )
-        self.new_block = to_cuda(self.new_block)
-        self.prev_channel_dim = input_dim
+        self.new_block = self.new_block
+        super().extend()
 
     def forward(self, x, condition, pose_info):
         pose_channels = generate_pose_channel_images(4,
@@ -114,20 +104,16 @@ class Discriminator(nn.Module):
 class DeepDiscriminator(nn.Module):
 
     def __init__(self, 
-                 in_channels,
+                 image_channels,
                  start_channel_dim,
                  pose_size
                  ):
-        self.orig_start_channel_dim = start_channel_dim
         #start_channel_dim = int(start_channel_dim*(2**0.5))
-        super(DeepDiscriminator, self).__init__()
+        super().__init__(pose_size, start_channel_dim, image_channels)
         
-        self.num_poses = pose_size // 2
-        self.image_channels = in_channels
-        self.current_imsize = 4
-        self.from_rgb_new = conv_module_bn(in_channels*2, start_channel_dim, 1, 0)
+        self.from_rgb_new = conv_module_bn(image_channels*2, start_channel_dim, 1, 0)
 
-        self.from_rgb_old = conv_module_bn(in_channels*2, start_channel_dim, 1, 0)
+        self.from_rgb_old = conv_module_bn(image_channels*2, start_channel_dim, 1, 0)
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
             nn.Sequential(
@@ -136,18 +122,13 @@ class DeepDiscriminator(nn.Module):
                 conv_module_bn(start_channel_dim, start_channel_dim, 4, 0)
             )
         )
-        self.core_model = to_cuda(self.core_model)
+        self.core_model = self.core_model
         self.output_layer = WSLinear(start_channel_dim, 1)
-        self.transition_value = 1.0
-        self.prev_channel_dim = start_channel_dim
-        self.extension_channels = []
 
-    def extend(self, input_dim):
-        self.extension_channels.append(input_dim)
-        #input_dim = int(input_dim * (2**0.5))
-        self.current_imsize *= 2
+    def extend(self):
+        input_dim = self.transition_channels[self.transition_step]
         output_dim = self.prev_channel_dim
-        if not self.current_imsize == 8:
+        if self.transition_step != 0:
             self.core_model = nn.Sequential(
                 self.new_block,
                 *self.core_model.children()
@@ -157,15 +138,15 @@ class DeepDiscriminator(nn.Module):
             self.from_rgb_new
         )
         self.from_rgb_new = conv_module_bn(self.image_channels*2, input_dim, 1, 0)
-        self.from_rgb_new = to_cuda(self.from_rgb_new)
+        self.from_rgb_new = self.from_rgb_new
         self.new_block = nn.Sequential(
             conv_module_bn(input_dim + self.num_poses, input_dim, 1, 0),
             ResNetBlock(input_dim, 4),
             conv_module_bn(input_dim, output_dim, 1, 0),
             nn.AvgPool2d([2, 2])
         )
-        self.new_block = to_cuda(self.new_block)
-        self.prev_channel_dim = input_dim
+        self.new_block = self.new_block
+        super().extend()
 
     def forward(self, x, condition, pose_info):
         pose_channels = generate_pose_channel_images(4,

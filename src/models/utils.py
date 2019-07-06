@@ -7,6 +7,10 @@ batch_indexes = {
 pose_indexes = {
 
 }
+def get_transition_value(x_old, x_new, transition_variable):
+    assert x_old.shape == x_new.shape
+    return torch.lerp(x_old, x_new, transition_variable)
+
 
 def generate_pose_channel_images(min_imsize, max_imsize, device, pose_information, dtype):
     batch_size = pose_information.shape[0]

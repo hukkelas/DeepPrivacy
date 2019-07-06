@@ -23,3 +23,5 @@ fid/
 scripts/.detectron_predictions
 scripts/debug
 .results
+*.ckpt
+*.pth

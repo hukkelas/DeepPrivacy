@@ -2,6 +2,8 @@ import os
 import shutil
 import torch
 from apex.amp._amp_state import _amp_state
+from models.discriminator import Discriminator, DeepDiscriminator
+from models.generator import Generator
 
 def to_cuda(elements):
     if torch.cuda.is_available():
@@ -95,12 +97,6 @@ def _rampdown_linear(epoch, num_epochs, rampdown_length):
     else:
         return 1.0
 
-
-def get_transition_value(x_old, x_new, transition_variable):
-    assert x_old.shape == x_new.shape
-    return torch.lerp(x_old, x_new, transition_variable)
-
-
 def init_model(start_channel_size, num_levels, model):
     transition_channels = [
         start_channel_size,
@@ -128,3 +124,38 @@ def amp_state_has_overflow():
         if loss_scaler._has_overflow:
             return True
     return False
+
+
+
+class NetworkWrapper(torch.nn.Module):
+
+    def __init__(self, network):
+        super().__init__()
+        self.network = network
+        self.forward_block = torch.nn.DataParallel(
+            self.network
+        )
+
+    def forward(self, *inputs):
+        return self.forward_block(*inputs)
+
+    def extend(self):
+        self.network.extend()
+        
+    def update_transition_value(self, value):
+        self.network.transition_value = value
+
+    def new_parameters(self):
+        return self.network.new_parameters()
+
+    def state_dict(self):
+        return self.network.state_dict()
+    
+    def load_state_dict(self, ckpt):
+        self.network.load_state_dict(ckpt)
+
+
+def wrap_models(models):
+    if isinstance(models, tuple) or isinstance(models, list):
+        return [NetworkWrapper(x) for x in models]
+    return NetworkWrapper(models)

@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
-from utils import to_cuda
-from utils import get_transition_value
 from models.custom_layers import PixelwiseNormalization, WSConv2d, UpSamplingBlock
-from models.utils import generate_pose_channel_images
+from models.utils import generate_pose_channel_images, get_transition_value
+from models.base_model import ProgressiveBaseModel
 
 def conv_bn_relu(in_dim, out_dim, kernel_size, padding=0):
     return nn.Sequential(
@@ -38,18 +37,15 @@ class UnetUpsamplingBlock(nn.Module):
         x = self.model(x)
         return x
 
-class Generator(nn.Module):
+class Generator(ProgressiveBaseModel):
 
     def __init__(self,
                  pose_size,
                  start_channel_dim,
                  image_channels):
-        super().__init__()
+        super().__init__(pose_size, start_channel_dim, image_channels)
         # Transition blockss
-        self.orig_start_channel_dim = start_channel_dim
-        self.image_channels = image_channels
-        self.transition_value = 1.0
-        self.num_poses = pose_size // 2
+        self.orig_start_channel_dim  = start_channel_dim
         self.to_rgb_new = WSConv2d(start_channel_dim, self.image_channels, 1, 0)
         self.to_rgb_old = WSConv2d(start_channel_dim, self.image_channels, 1, 0)
 
@@ -61,7 +57,6 @@ class Generator(nn.Module):
                 conv_bn_relu(start_channel_dim+self.num_poses, start_channel_dim, 1, 0),
                 UnetUpsamplingBlock(start_channel_dim, start_channel_dim)
             )
-            
         ])
 
         self.new_up = nn.Sequential()
@@ -69,23 +64,20 @@ class Generator(nn.Module):
         self.new_down = nn.Sequential()
         self.from_rgb_new = conv_bn_relu(self.image_channels, start_channel_dim, 1, 0)
         self.from_rgb_old =  conv_bn_relu(self.image_channels, start_channel_dim, 1, 0)
-        self.current_imsize = 4
+        
         self.upsampling = UpSamplingBlock()
-        self.prev_channel_size = start_channel_dim
         self.downsampling = nn.AvgPool2d(2)
-        self.extension_channels = []
 
-    def extend(self, output_dim):
+    def extend(self):
+        output_dim = self.transition_channels[self.transition_step]
         print("extending G", output_dim)
         # Downsampling module
-        self.extension_channels.append(output_dim)
-        self.current_imsize *= 2
 
         self.from_rgb_old = nn.Sequential(
             nn.AvgPool2d([2, 2]),
             self.from_rgb_new
         )
-        if self.current_imsize == 8:
+        if self.transition_step == 0:
             core_block_up = nn.Sequential(
                 self.core_blocks_up[0],
                 UpSamplingBlock()
@@ -106,7 +98,7 @@ class Generator(nn.Module):
 
         self.from_rgb_new =  conv_bn_relu(self.image_channels, output_dim, 1, 0)
         self.new_down = nn.Sequential(
-            UnetDownSamplingBlock(output_dim, self.prev_channel_size)
+            UnetDownSamplingBlock(output_dim, self.prev_channel_extension)
         )
         self.new_down = self.new_down
         # Upsampling modules
@@ -114,10 +106,10 @@ class Generator(nn.Module):
         self.to_rgb_new = WSConv2d(output_dim, self.image_channels, 1, 0)
 
         self.new_up = nn.Sequential(
-            conv_bn_relu(self.prev_channel_size*2+self.num_poses, self.prev_channel_size, 1, 0),
-            UnetUpsamplingBlock(self.prev_channel_size, output_dim)
+            conv_bn_relu(self.prev_channel_extension*2+self.num_poses, self.prev_channel_extension, 1, 0),
+            UnetUpsamplingBlock(self.prev_channel_extension, output_dim)
         )
-        self.prev_channel_size = output_dim
+        super().extend()
 
     def new_parameters(self):
         new_paramters = list(self.new_down.parameters()) + list(self.to_rgb_new.parameters())
@@ -128,7 +120,7 @@ class Generator(nn.Module):
         #z = torch.randn(x_in.shape[0], 1, *x_in.shape[2:], device=x_in.device, dtype=x_in.dtype)
         #x_in = torch.cat((x_in, z), dim=1)
         unet_skips = []
-        if self.current_imsize != 4:
+        if self.transition_step != 0:
             old_down = self.from_rgb_old(x_in)
             new_down = self.from_rgb_new(x_in)
             new_down = self.new_down(new_down)
@@ -156,7 +148,7 @@ class Generator(nn.Module):
             x = torch.cat((x, skip_x, pose_channels[idx+1]), dim=1)
             x = block(x)
 
-        if self.current_imsize == 4:
+        if self.transition_step == 0:
             x = self.to_rgb_new(x)
             return x
         x_old = self.to_rgb_old(x)

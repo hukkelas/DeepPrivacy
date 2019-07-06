@@ -1,5 +1,6 @@
 import torch
 import utils
+from models.utils import get_transition_value
 
 class DataPrefetcher():
 
@@ -49,7 +50,7 @@ def interpolate_image(pool, images, transition_variable):
     y = pool(images)
     y = torch.nn.functional.interpolate(y, scale_factor=2)
 
-    images = utils.get_transition_value(y, images, transition_variable)
+    images = get_transition_value(y, images, transition_variable)
     return images
 
 def preprocess_images(image, transition_variable, pool=torch.nn.AvgPool2d(2, 2)):
