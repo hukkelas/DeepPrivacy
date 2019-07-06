@@ -9,10 +9,9 @@ if answer != "y" and "answer" != "yes":
     exit(0)
 for name in names:
     to_remove = [
-        "options/{}".format(name),
-        "summaries/{}".format(name),
-        "checkpoints/{}".format(name),
-        "generated_data/{}".format(name),
+        "models/{}/checkpoints".format(name),
+        "models/{}/summaries".format(name),
+        "models/{}/generated_data".format(name),
     ]
     for folder in to_remove:
         try:
