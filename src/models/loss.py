@@ -92,10 +92,8 @@ class WGANLoss:
         # Wasserstein-1 Distance
         wasserstein_distance = (real_scores - fake_scores).squeeze()
         
-        
         # Epsilon penalty
         epsilon_penalty = (real_scores ** 2).squeeze()
-        
 
         self.d_optimizer.zero_grad()
         gradient_pen = self.compute_gradient_penalty(real_data, fake_data, condition, landmarks)

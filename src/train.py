@@ -277,10 +277,35 @@ class Trainer:
         fake_data = self.generator(condition, landmarks)
         res = self.criterion.step(real_data, fake_data, condition, landmarks)
         if res is None:
-            return None
+            return
         wasserstein_distance, gradient_pen, real_scores, fake_scores, epsilon_penalty = res
-        return wasserstein_distance.mean().detach(), gradient_pen.mean().detach(), real_scores.mean().detach(), fake_scores.mean().detach(), epsilon_penalty.mean().detach()
-
+        self.total_time = (time.time() - self.start_time) / 60
+        if self.global_step >= self.next_log_point and not amp_state_has_overflow():
+            time_spent = time.time() - batch_start_time
+            nsec_per_img = time_spent / (self.global_step - self.next_log_point + self.num_ims_per_log) 
+            self.logger.log_variable("stats/nsec_per_img", nsec_per_img)
+            self.next_log_point = self.global_step + self.num_ims_per_log
+            batch_start_time = time.time()
+            self.log_loss_scales()
+            self.logger.log_variable(
+                'discriminator/wasserstein-distance',
+                wasserstein_distance.item())
+            self.logger.log_variable(
+                'discriminator/gradient-penalty',
+                gradient_pen.item())
+            self.logger.log_variable("discriminator/real-score",
+                            real_scores.item())
+            self.logger.log_variable("discriminator/fake-score",
+                            fake_scores.mean().item())
+            self.logger.log_variable("discriminator/epsilon-penalty",
+                            epsilon_penalty.item())
+            self.logger.log_variable("stats/transition-value",
+                            self.transition_variable)
+            self.logger.log_variable("stats/batch_size", self.batch_size)
+            self.logger.log_variable("stats/learning_rate", self.learning_rate)                        
+            self.logger.log_variable(
+                "stats/training_time_minutes", self.total_time)
+            
     def update_transition_value(self):
         self.transition_variable = utils.compute_transition_value(
             self.global_step, self.is_transitioning, self.transition_iters
@@ -289,8 +314,7 @@ class Trainer:
         self.generator.update_transition_value(self.transition_variable)
         self.running_average_generator.update_transition_value(self.transition_variable)
 
-
-    def save_validation_checkpoint(self):
+    def maybe_save_validation_checkpoint(self):
         validation_checkpoint = 30 * 10**6
         if self.global_step >= validation_checkpoint and (self.global_step - self.batch_size) < validation_checkpoint:
             print("Saving global checkpoint for validation")
@@ -311,53 +335,12 @@ class Trainer:
             self.dataloader_train.update_next_transition_variable(next_transition_value)
             for real_data, condition, landmarks in train_iter:
                 self.logger.update_global_step(self.global_step)
-                
-                self.d_optimizer.zero_grad()
-                self.g_optimizer.zero_grad()
-                
                 self.update_transition_value()
-                #real_data, condition, landmarks = prefetcher.next(self.transition_variable)
-                # Forward G
-                res = self.train_step(real_data,
-                                      condition,
-                                      landmarks)
-                if res is None:
-                    continue
-                wasserstein_distance, gradient_pen, real_scores, fake_scores, epsilon_penalty = res
-                nsec_per_img = (
-                    time.time() - batch_start_time) / self.batch_size
-                self.total_time = (time.time() - self.start_time) / 60
+                self.train_step(real_data, condition, landmarks)
+                
                 # Log data
                 self.update_running_average_generator()
-                self.save_validation_checkpoint()
-                if self.global_step >= self.next_log_point:
-                    
-                    time_spent = time.time() - batch_start_time
-                    nsec_per_img = time_spent / (self.global_step - self.next_log_point + self.num_ims_per_log) 
-                    self.logger.log_variable("stats/nsec_per_img", nsec_per_img)
-                    self.next_log_point = self.global_step + self.num_ims_per_log
-                    batch_start_time = time.time()
-                    self.log_loss_scales()
-                    if not amp_state_has_overflow():
-                        self.logger.log_variable(
-                            'discriminator/wasserstein-distance',
-                            wasserstein_distance.mean().item())
-                        self.logger.log_variable(
-                            'discriminator/gradient-penalty',
-                            gradient_pen.mean().item())
-                        self.logger.log_variable("discriminator/real-score",
-                                        real_scores.mean().item())
-                        self.logger.log_variable("discriminator/fake-score",
-                                        fake_scores.mean().item())
-                        self.logger.log_variable("discriminator/epsilon-penalty",
-                                        epsilon_penalty.mean().item())
-                        self.logger.log_variable("stats/transition-value",
-                                        self.transition_variable)
-                        self.logger.log_variable("stats/batch_size", self.batch_size)
-                        self.logger.log_variable("stats/learning_rate", self.learning_rate)                        
-                        self.logger.log_variable(
-                            "stats/training_time_minutes", self.total_time)
-                    
+                self.maybe_save_validation_checkpoint()    
                 
                 if self.global_step >= self.next_image_save_point:
                     self.next_image_save_point = self.global_step + self.num_ims_per_save_image
@@ -405,8 +388,6 @@ class Trainer:
                         
                         # Save image after transition
                         self.save_transition_image(False)
-                        
-
                         break
                 self.global_step += self.batch_size
                 next_transition_value = utils.compute_transition_value(
