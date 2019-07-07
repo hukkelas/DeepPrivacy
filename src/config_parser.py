@@ -49,10 +49,12 @@ def validate_config(config):
     assert config.train_config.amp_opt_level in ["O1","O0"], "Optimization level not correct. It was: {}".format(config.opt_level)
     validate_start_channel_size(config.max_imsize, config.models.start_channel_size)
 
-def initialize_and_validate_config():
+def initialize_and_validate_config(additional_arguments=[]):
     parser = ArgumentParser()
     parser.add_argument("config_path",
                         help="Set the name of the model")
+    for additional_arg in additional_arguments:
+        parser.add_argument(f'--{additional_arg["name"]}', default=additional_arg["default"])
 
     args = parser.parse_args()
     assert os.path.isfile(args.config_path), "Did not find config file:".format(args.config_path)
@@ -67,6 +69,8 @@ def initialize_and_validate_config():
         "generated_data_dir": os.path.join(config_dir, "generated_data"),
         "summaries_dir": os.path.join(config_dir, "summaries")
     }
+    for additional_arg in additional_arguments:
+        new_config_fields[additional_arg["name"]] = vars(args)[additional_arg["name"]]
     config = namedtuple("Config", list(config._asdict().keys()) + list(new_config_fields.keys()))(
         *(list(config._asdict().values()) + list(new_config_fields.values()))
     )

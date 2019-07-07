@@ -1,5 +1,7 @@
 import cv2
 import matplotlib
+import numpy as np
+
 
 colors = list(matplotlib.colors.cnames.values())
 hex_to_rgb = lambda h: tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
@@ -14,4 +16,7 @@ def draw_faces_with_keypoints(im, bboxes, keypoints):
         im = cv2.rectangle(im, (x0, y0), (x1, y1), color)
         for (x,y) in keypoint:
             im = cv2.circle(im, (x,y), radius, color)
+
+    if type(im) != np.ndarray:
+        return im.get()
     return im

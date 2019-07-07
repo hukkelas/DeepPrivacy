@@ -26,3 +26,4 @@ scripts/debug
 *.ckpt
 *.pth
 models/old
+anonymized_images/
