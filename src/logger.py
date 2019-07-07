@@ -1,4 +1,4 @@
-import tensorboardX
+from torch.utils.tensorboard import SummaryWriter
 import torchvision
 import os
 
@@ -10,10 +10,10 @@ WARNING = 2
 class Logger:
 
     def __init__(self, logdir, generated_data_dir):
-        self.writer = tensorboardX.SummaryWriter(
+        self.writer = SummaryWriter(
             os.path.join(logdir, "train")
         )
-        self.validation_writer = tensorboardX.SummaryWriter(
+        self.validation_writer = SummaryWriter(
             os.path.join(logdir, "val"))
         self.global_step = 0
         self.image_dir = generated_data_dir
