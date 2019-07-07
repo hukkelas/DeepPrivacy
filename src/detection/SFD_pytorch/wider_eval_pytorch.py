@@ -5,14 +5,17 @@ import torch.nn.functional as F
 import cv2
 import numpy as np
 
-from SFD_pytorch.net_s3fd import s3fd
-from SFD_pytorch.bbox import nms, decode
-
+from src.detection.SFD_pytorch.net_s3fd import s3fd
+from src.detection.SFD_pytorch.bbox import nms, decode
+from apex import amp
+from src.utils import to_cuda
 net = s3fd()
-net.load_state_dict(torch.load('SFD_pytorch/data/s3fd_convert.pth'))
+net.load_state_dict(torch.load('src/detection/SFD_pytorch/data/s3fd_convert.pth'))
 if torch.cuda.is_available():
     net.cuda()
 net.eval()
+to_cuda(net)
+#net = amp.initialize([net], opt_level="O1")[0]
 
 def detect(net,img):
     img = img - np.array([104,117,123])
@@ -75,34 +78,32 @@ def scale_detect(net,img,scale=2.0,facesize=None):
     if 0==len(bboxlist): bboxlist=np.zeros((1, 5))
     return bboxlist
 
-def detect_and_supress(img):
-    resize_ratio = 1.0
-    if max(img.shape) > 1080:
-        resize_ratio = 1080 / max(img.shape)
-        img = cv2.resize(img, (0,0), fx=resize_ratio, fy=resize_ratio)
-    bbox1 = detect(net, img)
-    bbox2 = flip_detect(net, img)
-    bbox3 = np.zeros((1, 5))
-    if img.shape[0]*img.shape[1]*4 <= 3000*3000:
-        bbox3 = scale_detect(net, img, scale=2, facesize=100)
-    bbox4 = scale_detect(net, img, scale=0.5, facesize=100)
-    bboxes = np.concatenate((bbox1, bbox2, bbox3, bbox4))
-    keep = nms(bboxes, 0.3)[:750]
-    bboxes = bboxes[keep]
-    bboxes = bboxes[bboxes[:, 4] >= 0.5] # Remove small faces
-    
-    bboxes /= resize_ratio    
-    
+def detect_and_supress(img, score_threshold):
+    with torch.no_grad():
+        resize_ratio = 1.0
+        if max(img.shape) > 1080:
+            resize_ratio = 1080 / max(img.shape)
+            img = cv2.resize(img, (0,0), fx=resize_ratio, fy=resize_ratio)
+        bbox1 = detect(net, img)
+        bbox2 = flip_detect(net, img)
+        bbox3 = np.zeros((1, 5))
+        if img.shape[0]*img.shape[1]*4 <= 3000*3000:
+            bbox3 = scale_detect(net, img, scale=2, facesize=100)
+        bbox4 = scale_detect(net, img, scale=0.5, facesize=100)
+        bboxes = np.concatenate((bbox1, bbox2, bbox3, bbox4))
+        keep = nms(bboxes, 0.3)[:750]
+        bboxes = bboxes[keep]
+        bboxes = bboxes[bboxes[:, 4] >= 0.5] # Remove small faces
+        
+        bboxes /= resize_ratio
+        scores = bboxes[:, 4]
+        bboxes = bboxes[scores > score_threshold, :]
+        scores = bboxes[:, 4]
+        sorted_ix = np.argsort(scores)[::-1]
+        bboxes = bboxes[sorted_ix]
 
-    #im = img.copy()
-    #for b in bboxes:
-    #    x1,y1,x2,y2,_ = b
-    #    cv2.rectangle(im,(int(x1),int(y1)),(int(x2),int(y2)),(0,0,255),1)
-    scores = bboxes[:, 4]
-    sorted_ix = np.argsort(scores)[::-1]
-    bboxes = bboxes[sorted_ix]
-    bboxes = bboxes.astype("int")
-    return bboxes[:, :4]
+        bboxes = bboxes.astype("int")
+        return bboxes[:, :4]
 
 if __name__ == "__main__":
     img = cv2.imread("maxresdefault.jpg")

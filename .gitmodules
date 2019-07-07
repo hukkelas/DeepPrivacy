@@ -1,3 +1,6 @@
 [submodule "SFD_pytorch"]
 	path = SFD_pytorch
 	url = git@github.com:hukkelas/SFD_pytorch.git
+[submodule "S3FD.PyTorch"]
+	path = S3FD.PyTorch
+	url = https://github.com/luuuyi/S3FD.PyTorch
