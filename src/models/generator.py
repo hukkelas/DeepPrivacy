@@ -54,7 +54,7 @@ class Generator(ProgressiveBaseModel):
         ])
         self.core_blocks_up = nn.ModuleList([
             nn.Sequential(
-                conv_bn_relu(start_channel_dim+self.num_poses, start_channel_dim, 1, 0),
+                conv_bn_relu(start_channel_dim+self.num_poses+32, start_channel_dim, 1, 0),
                 UnetUpsamplingBlock(start_channel_dim, start_channel_dim)
             )
         ])
@@ -117,8 +117,7 @@ class Generator(ProgressiveBaseModel):
         return new_paramters
 
     def forward(self, x_in, pose_info):
-        #z = torch.randn(x_in.shape[0], 1, *x_in.shape[2:], device=x_in.device, dtype=x_in.dtype)
-        #x_in = torch.cat((x_in, z), dim=1)
+        z = torch.randn(x_in.shape[0], 32, 4, 4, device=x_in.device, dtype=x_in.dtype)
         unet_skips = []
         if self.transition_step != 0:
             old_down = self.from_rgb_old(x_in)
@@ -139,7 +138,7 @@ class Generator(ProgressiveBaseModel):
                                                      x_in.device,
                                                      pose_info,
                                                      x_in.dtype)
-        x = torch.cat((x, pose_channels[0]), dim=1)
+        x = torch.cat((x, pose_channels[0], z), dim=1)
         x = self.core_blocks_up[0](x)
 
         for idx, block in enumerate(self.core_blocks_up[1:]):

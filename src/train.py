@@ -11,6 +11,7 @@ from src.models.unet_model import init_model
 from src.data_tools.dataloaders_v2 import load_dataset
 from src import config_parser
 from src.metrics import fid
+from src.models import loss
 import tqdm
 import apex
 from src.data_tools.data_utils import denormalize_img
@@ -24,44 +25,6 @@ if False:
     torch.set_printoptions(precision=10)
 else:
     torch.backends.cudnn.benchmark = True
-
-
-def check_overflow(grad):
-    cpu_sum = float(grad.float().sum())
-    if cpu_sum == float("inf") or cpu_sum == -float("inf") or cpu_sum != cpu_sum:
-        return True
-    return False
-
-@amp.float_function
-def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks, loss_scaler):
-    epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() - 1)
-    epsilon = torch.rand(epsilon_shape)
-    epsilon = to_cuda(epsilon)
-    epsilon = epsilon.to(fake_data.dtype)
-    real_data = real_data.to(fake_data.dtype)
-    x_hat = epsilon * real_data + (1-epsilon) * fake_data.detach()
-    x_hat.requires_grad = True
-    logits = discriminator(x_hat, condition, landmarks)
-    logits = logits.sum() * loss_scaler.loss_scale()
-    grad = torch.autograd.grad(
-        outputs=logits,
-        inputs=x_hat,
-        grad_outputs=torch.ones(logits.shape).to(fake_data.dtype).to(fake_data.device),
-        create_graph=True
-    )[0] 
-    grad = grad.view(x_hat.shape[0], -1)
-    if check_overflow(grad):
-        print("Overflow in gradient penalty calculation.")
-        loss_scaler._loss_scale /= 2
-        print("Scaling down loss to:", loss_scaler._loss_scale)
-        return None
-    grad = grad / loss_scaler.loss_scale()
-
-    grad_penalty = ((grad.norm(p=2, dim=1) - 1)**2)
-    return grad_penalty.to(fake_data.dtype)
-
-
-
 
 class Trainer:
 
@@ -100,6 +63,7 @@ class Trainer:
                                                             self.image_channels,
                                                             self.discriminator_model)
         self.init_running_average_generator()
+        self.criterion = loss.WGANLoss(self.discriminator, self.generator, self.opt_level)
         if not self.load_checkpoint():
             self.extend_models()
             self.init_optimizers()
@@ -109,11 +73,9 @@ class Trainer:
         self.batch_size = self.batch_size_schedule[self.current_imsize]
         self.logger.log_variable("stats/batch_size", self.batch_size)
 
-        if self.opt_level == "O0":
-            self.wgan_gp_scaler = amp.scaler.LossScaler(1)
-        else:
-            self.wgan_gp_scaler = amp.scaler.LossScaler(2**14)
+
         
+      
         self.num_ims_per_log = config.logging.num_ims_per_log
         self.next_log_point = self.global_step
         self.num_ims_per_save_image = config.logging.num_ims_per_save_image
@@ -123,6 +85,7 @@ class Trainer:
 
         self.dataloader_train, self.dataloader_val = load_dataset(
             self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.pose_size, self.load_fraction_of_dataset)
+        
 
     def save_checkpoint(self, filepath=None):
         if filepath is None:
@@ -225,6 +188,7 @@ class Trainer:
                                      lr=self.learning_rate,
                                      betas=(0.0, 0.99))
         self.initialize_amp()
+        self.criterion.update_optimizers(self.d_optimizer, self.g_optimizer)
 
     def initialize_amp(self):
         to_cuda([self.generator, self.discriminator])
@@ -311,51 +275,10 @@ class Trainer:
     
     def train_step(self, real_data, condition, landmarks):
         fake_data = self.generator(condition, landmarks)
-        # Train Discriminator
-        real_scores = self.discriminator(
-            real_data, condition, landmarks)
-        fake_scores = self.discriminator(
-            fake_data.detach(), condition, landmarks)
-        # Wasserstein-1 Distance
-        wasserstein_distance = (real_scores - fake_scores).squeeze()
-        gradient_pen = gradient_penalty(
-            real_data.data, fake_data.detach(), self.discriminator,
-            condition, landmarks, self.wgan_gp_scaler)
-        if gradient_pen is None:
+        res = self.criterion.step(real_data, fake_data, condition, landmarks)
+        if res is None:
             return None
-        # Epsilon penalty
-        epsilon_penalty = (real_scores ** 2).squeeze()
-        assert epsilon_penalty.shape == gradient_pen.shape
-        assert wasserstein_distance.shape == epsilon_penalty.shape
-        D_loss = - wasserstein_distance
-        D_loss = D_loss + gradient_pen * 10 + epsilon_penalty * 0.001
-
-        D_loss = D_loss.mean()
-        self.d_optimizer.zero_grad()
-
-        to_backward1 = - wasserstein_distance.mean()
-        with amp.scale_loss(to_backward1, self.d_optimizer, loss_id=0) as scaled_loss:
-            scaled_loss.backward(retain_graph=True)
-        # Hacky way to solve https://github.com/pytorch/pytorch/issues/13273
-        to_backward2 = gradient_pen.mean() * 10 + 0 * wasserstein_distance.mean()
-        with amp.scale_loss(to_backward2, self.d_optimizer, loss_id=1) as scaled_loss:
-            scaled_loss.backward(retain_graph=True)
-        to_backward3 = epsilon_penalty.mean() * 0.001
-        with amp.scale_loss(to_backward3, self.d_optimizer, loss_id=2) as scaled_loss:
-            scaled_loss.backward()
-
-        self.d_optimizer.step()
-
-        # Forward G
-        fake_scores = self.discriminator(
-            fake_data, condition, landmarks)
-        G_loss = (-fake_scores).mean()
-
-        self.d_optimizer.zero_grad()
-        self.g_optimizer.zero_grad()
-        with amp.scale_loss(G_loss, self.g_optimizer, loss_id=3) as scaled_loss:
-            scaled_loss.backward()
-        self.g_optimizer.step()
+        wasserstein_distance, gradient_pen, real_scores, fake_scores, epsilon_penalty = res
         return wasserstein_distance.mean().detach(), gradient_pen.mean().detach(), real_scores.mean().detach(), fake_scores.mean().detach(), epsilon_penalty.mean().detach()
 
     def update_transition_value(self):
