@@ -1,4 +1,4 @@
-data/
+data
 input_images/
 generated/
 generated_data/
@@ -13,3 +13,17 @@ test_examples/
 __pycache__
 *.zip
 *.out
+*.fid_cache
+*.npy
+*.gz
+*.ipynb
+validation_checkpoints/
+test_scripts/
+fid/
+scripts/.detectron_predictions
+scripts/debug
+.results
+*.ckpt
+*.pth
+models/old
+anonymized_images/
