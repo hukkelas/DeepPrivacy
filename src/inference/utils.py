@@ -12,7 +12,7 @@ def to_torch(image):
     image = to_cuda(image)
     return image
 
-def image_to_numpy(images):
+def image_to_numpy(images, to_uint8=False):
     single_image = False
     if len(images.shape) == 3:
         single_image = True
@@ -20,6 +20,8 @@ def image_to_numpy(images):
     images = images.data.detach().cpu().numpy()
     r,g,b = images[:, 0], images[:, 1], images[:, 2]
     images = np.stack((r,g,b), axis=3)
+    if to_uint8:
+        images = (images*255).astype(np.uint8)
     if single_image:
         return images[0]
     return images
