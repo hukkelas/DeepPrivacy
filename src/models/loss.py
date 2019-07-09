@@ -1,6 +1,6 @@
 import torch
 from apex import amp
-from src.utils import to_cuda
+from src.torch_utils import to_cuda
 
 
 def check_overflow(grad):

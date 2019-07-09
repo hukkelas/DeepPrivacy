@@ -8,7 +8,7 @@ import numpy as np
 from src.detection.SFD_pytorch.net_s3fd import s3fd
 from src.detection.SFD_pytorch.bbox import nms, decode
 from apex import amp
-from src.utils import to_cuda
+from src.torch_utils import to_cuda
 net = s3fd()
 net.load_state_dict(torch.load('src/detection/SFD_pytorch/data/s3fd_convert.pth'))
 if torch.cuda.is_available():

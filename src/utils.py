@@ -5,24 +5,6 @@ from apex.amp._amp_state import _amp_state
 from src.models.discriminator import Discriminator, DeepDiscriminator
 from src.models.generator import Generator
 
-def to_cuda(elements):
-    if torch.cuda.is_available():
-        if type(elements) == tuple or type(elements) == list:
-            return [x.cuda() for x in elements]
-        return elements.cuda()
-    return elements
-
-
-def init_weights(m):
-    if type(m) == torch.nn.Conv2d:
-        torch.nn.init.xavier_normal_(m.weight)
-        if m.bias is not None:
-            m.bias.data.fill_(0.0)
-    if type(m) == torch.nn.Linear:
-        torch.nn.init.xavier_normal_(m.weight)
-        m.bias.data.fill_(0.0)
-
-
 def save_checkpoint(state, save_path, is_best=False, max_keep=None):
     # save checkpoint
     torch.save(state, save_path)
@@ -53,7 +35,6 @@ def save_checkpoint(state, save_path, is_best=False, max_keep=None):
     if is_best:
         shutil.copyfile(save_path, os.path.join(save_dir, 'best_model.ckpt'))
 
-
 def load_checkpoint(ckpt_dir_or_file, load_best=False, map_location=None):
     if os.path.isdir(ckpt_dir_or_file):
         if load_best:
@@ -67,21 +48,15 @@ def load_checkpoint(ckpt_dir_or_file, load_best=False, map_location=None):
     print(' [*] Loading checkpoint from %s succeed!' % ckpt_path)
     return ckpt
 
-
-
 def clip(tensor, min_val, max_val):
     tensor[tensor < min_val] = min_val
     tensor[tensor > max_val] = max_val
     return tensor
 
-
-
 def flip_horizontal(images):
     # Flip on -1 dimension
     idx = torch.arange(images.shape[-1] -1, -1, -1 ,dtype=torch.long)
     return images[:, :, :, idx]
-
-
 
 def _rampup(epoch, rampup_length):
     if epoch < rampup_length:
@@ -116,16 +91,11 @@ def truncated_normal(mean, std, size):
     normal = torch.zeros(size).normal_(mean=mean, std=std)
     return normal
 
-
-
-
 def amp_state_has_overflow():
     for loss_scaler in _amp_state.loss_scalers:
         if loss_scaler._has_overflow:
             return True
     return False
-
-
 
 class NetworkWrapper(torch.nn.Module):
 

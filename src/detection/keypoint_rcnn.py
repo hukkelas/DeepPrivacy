@@ -1,7 +1,7 @@
 from torchvision.models.detection import keypointrcnn_resnet50_fpn
 import numpy as np
 import torch
-from src.utils import to_cuda
+from src.torch_utils import to_cuda
 from apex import amp
 
 model = keypointrcnn_resnet50_fpn(pretrained=True)

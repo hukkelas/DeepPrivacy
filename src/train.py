@@ -5,7 +5,8 @@ import torch
 from apex import amp
 import torchvision
 from src import utils
-from src.utils import load_checkpoint, save_checkpoint, to_cuda, amp_state_has_overflow, wrap_models
+from src.torch_utils import to_cuda
+from src.utils import load_checkpoint, save_checkpoint, amp_state_has_overflow, wrap_models
 from src.models.generator import Generator
 from src.models.unet_model import init_model
 from src.data_tools.dataloaders_v2 import load_dataset

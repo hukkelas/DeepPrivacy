@@ -8,7 +8,7 @@ from src.detection.detection_api import detect_faces_with_keypoints
 from src.dataset_tools.utils import expand_bounding_box
 from src.data_tools.dataloaders_v2 import cut_bounding_box
 from src.data_tools.data_utils import denormalize_img
-from .utils import to_torch, image_to_numpy
+import src.torch_utils as torch_utils
 from src.visualization import utils as vis_utils
 
 def init_generator(config, ckpt):
@@ -18,7 +18,7 @@ def init_generator(config, ckpt):
         config.models.image_channels
     )
     g.load_state_dict(ckpt["G"])
-    utils.to_cuda(g)
+    torch_utils.to_cuda(g)
     return g
 
 def get_images_recursive(image_folder):
@@ -79,18 +79,18 @@ def anonymize_face(im, keypoints, bbox, generator, imsize, verbose=False):
     resized_im = cv2.resize(im, (imsize, imsize))
     to_generate = cut_bounding_box(resized_im.copy(), bbox)
     
-    to_generate = to_torch(to_generate)
+    to_generate = torch_utils.image_to_torch(to_generate)
     keypoints = keypoint_to_torch(keypoints)
     torch_input = to_generate * 2 - 1
     with torch.no_grad():
         generated = generator(torch_input, keypoints)
         generated = denormalize_img(generated)
-    generated = image_to_numpy(generated[0])
+    generated = torch_utils.image_to_numpy(generated[0])
     
     generated = (generated*255).astype(np.uint8)
 
     if verbose:
-        save_debug_image(resized_im, image_to_numpy((torch_input[0]+1)/2, to_uint8=True),
+        save_debug_image(resized_im, torch_utils.image_to_numpy((torch_input[0]+1)/2, to_uint8=True),
                          generated, keypoints, bbox)
     to_generate = cv2.resize(generated, (im.shape[0], im.shape[1]))
     return to_generate

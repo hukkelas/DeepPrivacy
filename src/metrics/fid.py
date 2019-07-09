@@ -7,7 +7,7 @@ import numpy as np
 import glob
 import os
 from scipy import linalg
-from src.utils import to_cuda
+from src.torch_utils import to_cuda
 
 
 class PartialInceptionNetwork(nn.Module):
