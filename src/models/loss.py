@@ -107,13 +107,14 @@ class WGANLoss:
         to_backward3 = epsilon_penalty.mean() * 0.001
         with amp.scale_loss(to_backward3, self.d_optimizer, loss_id=2) as scaled_loss:
             scaled_loss.backward()
-
+        
+        self.d_optimizer.step()
         # Forward G
         fake_scores = self.discriminator(
             fake_data, condition, landmarks)
         G_loss = (-fake_scores).mean()
 
-        self.d_optimizer.step()
+        
         self.d_optimizer.zero_grad()
         self.g_optimizer.zero_grad()
         with amp.scale_loss(G_loss, self.g_optimizer, loss_id=3) as scaled_loss:

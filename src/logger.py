@@ -1,4 +1,8 @@
-from torch.utils.tensorboard import SummaryWriter
+import torch
+if torch.__version__ == "0.5.0a0":
+    from tensorboardX import SummaryWriter
+else:
+    from torch.utils.tensorboard import SummaryWriter
 import torchvision
 import os
 

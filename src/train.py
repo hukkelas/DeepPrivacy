@@ -281,11 +281,11 @@ class Trainer:
         wasserstein_distance, gradient_pen, real_scores, fake_scores, epsilon_penalty = res
         self.total_time = (time.time() - self.start_time) / 60
         if self.global_step >= self.next_log_point and not amp_state_has_overflow():
-            time_spent = time.time() - batch_start_time
+            time_spent = time.time() - self.batch_start_time
             nsec_per_img = time_spent / (self.global_step - self.next_log_point + self.num_ims_per_log) 
             self.logger.log_variable("stats/nsec_per_img", nsec_per_img)
             self.next_log_point = self.global_step + self.num_ims_per_log
-            batch_start_time = time.time()
+            self.batch_start_time = time.time()
             self.log_loss_scales()
             self.logger.log_variable(
                 'discriminator/wasserstein-distance',
@@ -324,7 +324,7 @@ class Trainer:
             self.save_checkpoint(self.global_step, fpath)
 
     def train(self):
-        batch_start_time = time.time()
+        self.batch_start_time = time.time()
         while True:
             self.update_transition_value()
             self.dataloader_train.update_next_transition_variable(self.transition_variable)
