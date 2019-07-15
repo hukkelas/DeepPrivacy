@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt 
 
-TARGET_DIR = "data/yfcc100m_torch"
+TARGET_DIR = "data/yfcc100m_torch_fix_transition"
 os.makedirs(TARGET_DIR, exist_ok=True)
 IMAGE_TARGET_DIR = os.path.join(TARGET_DIR, "original")
 os.makedirs(IMAGE_TARGET_DIR, exist_ok=True)
@@ -71,7 +71,7 @@ def match_bbox_keypoint(bounding_boxes, keypoints):
 def process_face(bbox, landmark, imshape):
     assert bbox.shape == (4,), "Was shape: {}".format(bbox.shape)
     assert landmark.shape == (2, 7), "Was shape: {}".format(landmark.shape)
-    #lt.clf()
+    
     try:
         x0, y0, width, height = expand_bounding_box(*bbox, BBOX_EXPANSION_FACTOR, imshape)
         x0 = int(x0)
@@ -145,13 +145,22 @@ def extract_and_save_image_batch(impaths, image_annotations, batch_idx):
             x0, y0, x1, y1 = annotation["expanded_bbox"]
             cut_im = image[y0:y1, x0:x1]
             extracted_faces.append(cut_im)
+    max_imsize = TARGET_IMSIZES[-1]
+    extracted_faces = [
+        cv2.resize(im, (max_imsize, max_imsize), interpolation=cv2.INTER_AREA)
+        for im in extracted_faces
+    ]
     for imsize in TARGET_IMSIZES:
         to_save = np.zeros((len(extracted_faces), imsize, imsize, 3), dtype=np.uint8)
+        
         for i, im in enumerate(extracted_faces):
             if len(im.shape) == 2:
                 im = cv2.cvtColor(im, cv2.COLOR_GRAY2RGB)
             im = im[:, :, :3]
-            im = cv2.resize(im, (imsize, imsize), interpolation=cv2.INTER_AREA)
+            im = np.moveaxis(im, 2, 0)
+            im = torch.from_numpy(im)[None]
+            im = torch.nn.functional.adaptive_avg_pool2d(im, (imsize, imsize))
+            im = np.moveaxis(im[0].numpy(), 0, 2)
             assert im.dtype == np.uint8
 
             to_save[i] = im
@@ -221,5 +230,7 @@ def main():
             jobs.append(job)
         for job in tqdm.tqdm(jobs):
             job.get()
+
+
 if __name__ == "__main__":
     main()

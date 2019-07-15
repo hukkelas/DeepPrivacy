@@ -48,6 +48,7 @@ class Trainer:
         # Logging variables
         self.checkpoint_dir = config.checkpoint_dir
         self.model_name = self.checkpoint_dir.split("/")[-2]
+        self.config_path = config.config_path
         self.global_step = 0
 
         # Transition settings
@@ -87,6 +88,11 @@ class Trainer:
         self.dataloader_train, self.dataloader_val = load_dataset(
             self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.pose_size, self.load_fraction_of_dataset)
         
+    def save_transition_checkpoint(self):
+        filedir = os.path.join(os.path.dirname(self.config_path), "transition_checkpoints")
+        os.makedirs(filedir, exist_ok=True)
+        filepath = os.path.join(filedir, f"imsize{self.current_imsize}.ckpt")
+        self.save_checkpoint(filepath)
 
     def save_checkpoint(self, filepath=None):
         if filepath is None:
@@ -210,7 +216,7 @@ class Trainer:
         to_save = torch.cat((real_data, condition, fake_data))
         tag = "before" if before else "after"
         imsize = self.current_imsize if before else self.current_imsize // 2
-        imname = "transition/{}_{}".format(tag, imsize)
+        imname = "transition/{}_{}_".format(tag, imsize)
         self.logger.save_images(imname, to_save, log_to_writer=False)
 
     def validate_model(self):
@@ -323,7 +329,7 @@ class Trainer:
             os.makedirs(dirname, exist_ok=True)
             fpath = os.path.join(dirname, "step_{}.ckpt".format(self.global_step))
             self.save_checkpoint(self.global_step, fpath)
-
+    
     def train(self):
         self.batch_start_time = time.time()
         while True:
@@ -372,7 +378,7 @@ class Trainer:
                         self.save_checkpoint()
                     elif self.current_imsize < self.max_imsize:
                         # Save image before transition
-                        self.save_checkpoint()
+                        self.save_transition_checkpoint()
                         self.save_transition_image(True)
                         self.extend_models()
                         del self.dataloader_train, self.dataloader_val
@@ -386,6 +392,9 @@ class Trainer:
                             self.transition_variable)
                         self.generator.update_transition_value(
                             self.transition_variable)
+                        self.running_average_generator.update_transition_value(
+                            self.transition_variable
+                        )
                         
                         # Save image after transition
                         self.save_transition_image(False)

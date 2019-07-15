@@ -56,7 +56,7 @@ class DeepPrivacyDataset(torch.utils.data.Dataset):
                 bbox[[0, 2]] = self.imsize - bbox[[2, 0]]
         im = np.asarray(im)
         condition = im.copy()
-        condition = cut_bounding_box(condition, bbox)
+        condition = cut_bounding_box(condition, bbox, self.is_transitioning)
 
         return im, condition, landmarks
 
@@ -152,8 +152,8 @@ def _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, p
                                                  drop_last=True,
                                                  pin_memory=True,
                                                  collate_fn=fast_collate)
-    dataloader_train = DataPrefetcher(dataloader_train, pose_size)
-    dataloader_val = DataPrefetcher(dataloader_val, pose_size)
+    dataloader_train = DataPrefetcher(dataloader_train, pose_size, dataset_train)
+    dataloader_val = DataPrefetcher(dataloader_val, pose_size, dataset_val)
     return dataloader_train, dataloader_val
 
 
@@ -180,18 +180,17 @@ def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
     return bounding_boxes
 
 
-def cut_bounding_box(condition, bounding_boxes):
-    x0 = bounding_boxes[0]
-    y0 = bounding_boxes[1]
-    x1 = bounding_boxes[2]
-    y1 = bounding_boxes[3]
+def cut_bounding_box(condition, bounding_boxes, is_transitioning):
+    print("Orig:", bounding_boxes)
+    bounding_boxes = bounding_boxes.clone()
+    if is_transitioning:
+        bounding_boxes = bounding_boxes // 2 * 2
+    x0, y0, x1, y1 = [k.item() for k in bounding_boxes]
     previous_image = condition[y0:y1, x0:x1]
-    #print(previous_image.max(), previous_image.min())
     if previous_image.size == 0:
         return condition
     mean = previous_image.mean()
     std = previous_image.std()
-    replacement = np.random.normal(mean, std,
-                                   size=previous_image.shape)
+    replacement = condition.mean()*np.ones(previous_image.shape)
     previous_image[:, :, :] = replacement.astype(condition.dtype)
     return condition

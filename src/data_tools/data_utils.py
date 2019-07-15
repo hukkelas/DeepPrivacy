@@ -4,12 +4,13 @@ from src.models.utils import get_transition_value
 
 class DataPrefetcher():
 
-    def __init__(self, loader, pose_size):
+    def __init__(self, loader, pose_size, dataset):
         self.pool = torch.nn.AvgPool2d(2, 2)
         self.original_loader = loader
         self.stream = torch.cuda.Stream()
         self.pose_size = pose_size
         self.i = 0
+        self.dataset = dataset
 
     def preload(self):
         try:
@@ -58,6 +59,7 @@ class DataPrefetcher():
     
     def update_next_transition_variable(self, transition_variable):
         self.transition_variable = transition_variable
+        self.dataset.is_transitioning = self.transition_variable != 1.0
 
 
 def interpolate_image(pool, images, transition_variable):
