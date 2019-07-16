@@ -20,7 +20,7 @@ def draw_faces_with_keypoints(im, bboxes, keypoints, draw_bboxes=True):
       im = cv2.rectangle(im, (x0, y0), (x1, y1), color)
     for x,y in keypoint:
       
-      im = cv2.circle(im, (x,y), radius, color)
+      im = cv2.circle(im, (int(x),int(y)), radius, color)
   if type(im) != np.ndarray:
     return im.get()
   return im
