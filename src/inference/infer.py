@@ -2,6 +2,7 @@ import os
 import cv2
 import torch
 import numpy as np
+from ..data_tools import data_utils
 from src import config_parser, utils
 from src.models.generator import Generator
 from src.detection.detection_api import detect_faces_with_keypoints
@@ -18,6 +19,7 @@ def init_generator(config, ckpt):
         config.models.image_channels
     )
     g.load_state_dict(ckpt["G"])
+    g.eval()
     torch_utils.to_cuda(g)
     return g
 
@@ -57,7 +59,11 @@ def shift_and_scale_keypoint(keypoint, expanded_bbox):
     keypoint /= w
     return keypoint
 
-def save_debug_image(original_image, input_image, generated, keypoints, bbox):
+def save_debug_image(original_image, input_image, generated, keypoints, bbox, expanded_bbox):
+    x0e, y0e, x1e, y1e = expanded_bbox
+    original_image = original_image[y0e:y1e, x0e:x1e]
+    original_image = cv2.resize(original_image, (input_image.shape[0], input_image.shape[0]))
+
     bbox = np.array(bbox)
     imname = os.path.basename(filepath).split(".")[0]
 
@@ -75,25 +81,51 @@ def save_debug_image(original_image, input_image, generated, keypoints, bbox):
     image = np.concatenate((original_image, input_image, generated), axis=1)
     cv2.imwrite(debug_path, image[:, :, ::-1])
 
-def anonymize_face(im, keypoints, bbox, generator, imsize, verbose=False):
-    resized_im = cv2.resize(im, (imsize, imsize))
-    to_generate = cut_bounding_box(resized_im.copy(), bbox)
-    
-    to_generate = torch_utils.image_to_torch(to_generate)
-    keypoints = keypoint_to_torch(keypoints)
-    torch_input = to_generate * 2 - 1
+def anonymize_face(im, keypoints, generator):
     with torch.no_grad():
-        generated = generator(torch_input, keypoints)
-        generated = denormalize_img(generated)
-    generated = torch_utils.image_to_numpy(generated[0])
-    
-    generated = (generated*255).astype(np.uint8)
+        generated = generator(im, keypoints)
+    return generated
 
-    if verbose:
-        save_debug_image(resized_im, torch_utils.image_to_numpy((torch_input[0]+1)/2, to_uint8=True),
-                         generated, keypoints, bbox)
-    to_generate = cv2.resize(generated, (im.shape[0], im.shape[1]))
-    return to_generate
+def pre_process(im, keypoint, bbox, imsize, cuda=True):
+    try:
+        x0e,  y0e, we, he = expand_bounding_box(*bbox, 0.35, im.shape)
+        x1e = x0e + we
+        y1e = y0e + he
+    except AssertionError as e:
+        print("Could not process image, bbox error", e)
+        return None
+    expanded_bbox = [x0e, y0e, x1e, y1e]
+    to_replace = im[y0e:y1e, x0e:x1e]
+    orig_shape = to_replace.shape
+    new_bbox = shift_bbox(bbox, expanded_bbox, imsize)
+    new_keypoint = shift_and_scale_keypoint(keypoint, expanded_bbox)
+    to_replace = cv2.resize(to_replace, (imsize, imsize))
+    to_replace = cut_bounding_box(to_replace.copy(), torch.tensor(new_bbox), False)
+    to_replace = torch_utils.image_to_torch(to_replace, cuda=cuda)
+    keypoint = keypoint_to_torch(new_keypoint)
+    torch_input = to_replace * 2 - 1
+    return torch_input, keypoint, expanded_bbox, new_bbox
+
+def post_process(im, generated_face, expanded_bbox, original_bbox, image_mask, verbose=False):
+    generated_face = denormalize_img(generated_face)
+    generated_face = torch_utils.image_to_numpy(generated_face[0], to_uint8=True)
+    orig_imsize = expanded_bbox[2] - expanded_bbox[0]
+    #if verbose:
+        #generator_input = torch_utils.image_to_numpy((torch_input[0]+1)/2, to_uint8=True)
+        #save_debug_image(generator_input, generator_input,
+        #                 generated_face, keypoints, bbox)
+    generated_face = cv2.resize(generated_face, (orig_imsize, orig_imsize))
+
+    # Stitch generated face to original image
+    
+    x0e, y0e, x1e, y1e = expanded_bbox
+    mask_single_face = image_mask[y0e:y1e, x0e:x1e]
+    to_replace = im[y0e:y1e, x0e:x1e]
+    to_replace[mask_single_face] = generated_face[mask_single_face]
+    im[y0e:y1e, x0e:x1e] = to_replace
+    x0, y0, x1, y1 = original_bbox
+    mask_single_face[y0:y1, x0:x1] = 0
+    return im
 
 
 def anonymize_image(im, keypoints, bounding_boxes, generator, imsize, verbose=False):
@@ -103,30 +135,27 @@ def anonymize_image(im, keypoints, bounding_boxes, generator, imsize, verbose=Fa
     replaced_mask = np.ones_like(im).astype("bool")
     global face_idx
     face_idx = 0
-    for keypoint, bbox in zip(keypoints, bounding_boxes):
-        try:
-            x0e,  y0e, we, he = expand_bounding_box(*bbox, 0.35, im.shape)
-            x1e = x0e + we
-            y1e = y0e + he
-        except AssertionError as e:
-            print("Could not process image, bbox error", e)
-            continue 
-        to_replace = im[y0e:y1e, x0e:x1e]
-        new_bbox = shift_bbox(bbox, [x0e, y0e, x1e, y1e], imsize)
-        new_keypoint = shift_and_scale_keypoint(keypoint, [x0e, y0e, x1e, y1e])
-        generated_face = anonymize_face(to_replace, new_keypoint, new_bbox, generator, imsize, verbose)
-        
-        mask_single_face = replaced_mask[y0e:y1e, x0e:x1e]
-        to_replace[mask_single_face] = generated_face[mask_single_face]
-        im[y0e:y1e, x0e:x1e] = to_replace
-        x0, y0, x1, y1 = bbox
-        mask_single_face[y0:y1, x0:x1] = 0
+    for keypoint, original_bbox in zip(keypoints, bounding_boxes):
+        res = pre_process(im, keypoint, original_bbox, imsize)
+        if res is None:
+            continue
+        to_replace, keypoint, expanded_bbox, shifted_bbox = res
+        generated_face = anonymize_face(to_replace, keypoint, generator)
+        im = post_process(im, generated_face, expanded_bbox, original_bbox, replaced_mask)
         face_idx += 1
+        if verbose:
+            save_debug_image(
+                im,
+                torch_utils.image_to_numpy(data_utils.denormalize_img(to_replace)[0], to_uint8=True),
+                torch_utils.image_to_numpy(data_utils.denormalize_img(generated_face)[0], to_uint8=True),
+                keypoint,
+                shifted_bbox,
+                expanded_bbox
+            )
     return im
 
 
-if __name__ == "__main__":
-    
+def read_args():
     config = config_parser.initialize_and_validate_config([
         {"name": "source_path", "default": "test_examples/source"},
         {"name": "target_path", "default": ""}
@@ -143,16 +172,22 @@ if __name__ == "__main__":
     generator = init_generator(config, ckpt)
 
     imsize = ckpt["current_imsize"]
-    image_paths = get_images_recursive(config.source_path)
+    source_path = config.source_path
+    image_paths = get_images_recursive(source_path)
+    return generator, imsize, source_path, image_paths, save_path
+
+
+if __name__ == "__main__":
+    generator, imsize, source_path, image_paths, save_path = read_args()
     
     for filepath in image_paths:
         im = cv2.imread(filepath)
-        face_boxes, keypoints = detect_faces_with_keypoints(im, keypoint_threshold=0.5)
+        face_boxes, keypoints = detect_faces_with_keypoints(im[:, :, ::-1], keypoint_threshold=0.5)
         anonymized_image = anonymize_image(im[:, :,::-1], keypoints, face_boxes, generator, imsize, verbose=True)
         annotated_im = vis_utils.draw_faces_with_keypoints(im, face_boxes, keypoints)
         to_save = np.concatenate((annotated_im, anonymized_image[:, :, ::-1]), axis=1)
 
-        relative_path = filepath[len(config.source_path)+1:]
+        relative_path = filepath[len(source_path)+1:]
         
         im_savepath = os.path.join(save_path, relative_path)
         print("Saving to:", im_savepath)

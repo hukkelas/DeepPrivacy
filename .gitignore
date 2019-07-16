@@ -27,3 +27,5 @@ scripts/debug
 *.pth
 models/old
 anonymized_images/
+.debug/
+transition_checkpoints/
