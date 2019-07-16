@@ -328,7 +328,7 @@ class Trainer:
             dirname = os.path.join("validation_checkpoints/{}".format(self.model_name))
             os.makedirs(dirname, exist_ok=True)
             fpath = os.path.join(dirname, "step_{}.ckpt".format(self.global_step))
-            self.save_checkpoint(self.global_step, fpath)
+            self.save_checkpoint(fpath)
     
     def train(self):
         self.batch_start_time = time.time()

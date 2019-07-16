@@ -17,7 +17,7 @@ def load_dataset(dataset, batch_size, imsize, full_validation, pose_size, load_f
         dirpath = os.path.join("data", "yfcc100m_torch")
         return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
     if dataset == "yfcc100m128":
-        dirpath = os.path.join("data", "yfcc100m128_torch")
+        dirpath = os.path.join("data", "yfcc100m_torch_fix_transition")
         return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
     if dataset == "yfcc100m128v2":
         dirpath = os.path.join("data", "yfcc100m128_torch_v2")
@@ -181,7 +181,6 @@ def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
 
 
 def cut_bounding_box(condition, bounding_boxes, is_transitioning):
-    print("Orig:", bounding_boxes)
     bounding_boxes = bounding_boxes.clone()
     if is_transitioning:
         bounding_boxes = bounding_boxes // 2 * 2
@@ -191,6 +190,7 @@ def cut_bounding_box(condition, bounding_boxes, is_transitioning):
         return condition
     mean = previous_image.mean()
     std = previous_image.std()
-    replacement = condition.mean()*np.ones(previous_image.shape)
+    
+    replacement = 128*np.ones(previous_image.shape)
     previous_image[:, :, :] = replacement.astype(condition.dtype)
     return condition

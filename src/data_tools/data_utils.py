@@ -25,18 +25,20 @@ class DataPrefetcher():
             self.next_condition = self.next_condition.cuda(non_blocking=True).float()
             self.next_landmark = self.next_landmark.cuda(non_blocking=True)
             
-            self.next_image = self.next_image / 255
-            self.next_image = self.next_image*2 - 1
-
-            self.next_condition = self.next_condition / 255
-            self.next_condition = self.next_condition*2 - 1
-
             self.next_image = interpolate_image(self.pool,
                                                 self.next_image,
                                                 self.transition_variable)
             self.next_condition = interpolate_image(self.pool,
                                                     self.next_condition,
                                                     self.transition_variable)
+            
+            self.next_image = self.next_image / 255
+            self.next_image = self.next_image*2 - 1
+
+            self.next_condition = self.next_condition / 255
+            self.next_condition = self.next_condition*2 - 1
+            
+            
 
     def __len__(self):
         return len(self.original_loader)
@@ -63,7 +65,8 @@ class DataPrefetcher():
 
 
 def interpolate_image(pool, images, transition_variable):
-    y = pool(images)
+    assert images.max() > 1
+    y = pool(images) // 1
     y = torch.nn.functional.interpolate(y, scale_factor=2)
 
     images = get_transition_value(y, images, transition_variable)
