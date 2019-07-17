@@ -16,7 +16,7 @@ def match_bbox_keypoint(bounding_boxes, keypoints):
         keypoints: [N persons, K keypoints, (x, y)]
     """
     if len(bounding_boxes) == 0 or len(keypoints) == 0:
-        return None, None 
+        return np.empty((0, 5)), np.empty((0, 7, 2)) 
     assert bounding_boxes.shape[1] == 4, "Shape was : {}".format(bounding_boxes.shape)
     assert keypoints.shape[1:] == (7, 2), "Keypoint shape was: {}".format(keypoints.shape)
     

@@ -2,6 +2,7 @@ import imagehash
 import json
 import numpy as np
 import torch
+import tqdm
 import os
 from PIL import Image
 from src.torch_utils import to_cuda
@@ -39,41 +40,54 @@ def detect_keypoints(img, keypoint_threshold=.3):
 
 def batch_detect_keypoints(images, keypoint_threshold=.3):
   orig_images = images
-  detections = [get_saved_detection(im) for im in images]
+  detections = [get_saved_detection(im, keypoint_threshold) for im in images]
   images = [np.moveaxis(im, 2, 0) / im.max() for im, det in zip(images, detections) if det is None]
 
-  images = [to_cuda(torch.from_numpy(im).float()) for im in images]
-  outputs = []
+  images = [torch.from_numpy(im).float() for im in images]
+  batch_size = 32
+  keypoints = []
+  scores = []
   if len(images) > 0:
+    num_batches = int(np.ceil(len(images) / batch_size))
     with torch.no_grad():
-      outputs = model(images)
-  keypoints = [o["keypoints"] for o in outputs]
-  scores = [o["scores"] for o in outputs]
+      for i in tqdm.trange(num_batches, desc="Keypoint inference"):
+        images_ = images[i*batch_size:(i+1)*batch_size]
+        images_ = [to_cuda(i) for i in images_]
+        outputs = model(images_)
+        images_ = [i.cpu() for i in images_]
+        keypoints += [o["keypoints"].cpu() for o in outputs]
+        scores += [o["scores"].cpu() for o in outputs]
   for i in range(len(scores)):
     im_scores = scores[i]
     im_keypoints = keypoints[i]
     mask = im_scores > keypoint_threshold
-    keypoints[i] = im_keypoints[mask, :, :2].cpu().numpy()
+    keypoints[i] = im_keypoints[mask, :, :2].numpy()
   idx = 0
   for d_idx in range(len(detections)):
     if detections[d_idx] is None:
       detections[d_idx] = keypoints[idx]
-      save_detection(orig_images[d_idx], keypoints[idx])
+      save_detection(orig_images[d_idx], keypoints[idx], keypoint_threshold)
       idx += 1
   write_detections_to_file()
   return detections
 
-def get_saved_detection(im):
+def get_saved_detection(im, keypoint_threshold):
   im = Image.fromarray(im)
   hash_id = str(imagehash.average_hash(im))
   if hash_id in image_hash_to_detections:
-    return np.array(image_hash_to_detections[hash_id])
+    if str(keypoint_threshold) in image_hash_to_detections[hash_id]:
+      dets = np.array(image_hash_to_detections[hash_id][str(keypoint_threshold)])
+      if len(dets) == 0:
+        return np.empty((0, 17, 2))
+      return dets
   return None
 
-def save_detection(im, detection):
+def save_detection(im, detection, keypoint_threshold):
   im = Image.fromarray(im)
   hash_id = imagehash.average_hash(im)
-  image_hash_to_detections[str(hash_id)] = detection.tolist()
+  image_hash_to_detections[str(hash_id)] = {
+    keypoint_threshold: detection.tolist()
+  }
 
 def write_detections_to_file():
   with open(image_hash_file, "w") as fp:

@@ -23,17 +23,18 @@ def detect_faces_with_keypoints(img, face_threshold=0.5, keypoint_threshold=0.3)
   face_bboxes, keypoints = match_bbox_keypoint(face_bboxes, keypoints)
   return face_bboxes, keypoints
 
-def batch_detect_faces_with_keypoints(images, face_threshold=.5, keypoint_threshold=.3):
-  im_bboxes = []
-  for im in tqdm.tqdm(images, desc="Batch detecting faces"):
-    det = get_saved_detection(im)
-    if det is not None:
-      im_bboxes.append(det)
-      continue
-    im_bboxes.append(
-      detect_and_supress(im[:, :, ::-1], face_threshold)
-    )
-    save_detection(im, im_bboxes[-1])
+def batch_detect_faces_with_keypoints(images, face_threshold=.5, keypoint_threshold=.3, im_bboxes=None):
+  if im_bboxes is None:
+    im_bboxes = []
+    for im in tqdm.tqdm(images, desc="Batch detecting faces"):
+      det = get_saved_detection(im)
+      if det is not None:
+        im_bboxes.append(det)
+        continue
+      im_bboxes.append(
+        detect_and_supress(im[:, :, ::-1], face_threshold)
+      )
+      save_detection(im, im_bboxes[-1])
   
   keypoints = keypoint_rcnn.batch_detect_keypoints(images, keypoint_threshold)
   for i in range(len(im_bboxes)):

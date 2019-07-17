@@ -124,7 +124,7 @@ def post_process(im, generated_face, expanded_bbox, original_bbox, image_mask, v
     to_replace[mask_single_face] = generated_face[mask_single_face]
     im[y0e:y1e, x0e:x1e] = to_replace
     x0, y0, x1, y1 = original_bbox
-    mask_single_face[y0:y1, x0:x1] = 0
+    image_mask[y0:y1, x0:x1, :] = 0
     return im
 
 

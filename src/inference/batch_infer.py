@@ -13,11 +13,13 @@ from src.visualization import utils as vis_utils
 def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_size):
   face_info = {}
   face_idx = 0
+  anonymized_images = [im.copy() for im in images]
   with multiprocessing.Pool(1) as pool:
     jobs = []
     for im_idx in range(len(images)):
-      im = images[im_idx]
+      im = images[im_idx].copy()
       face_keypoints = im_keypoints[im_idx]
+      
       face_bboxes = im_bboxes[im_idx]
       for keypoint, bbox in zip(face_keypoints, face_bboxes):
         face_info[face_idx] = {
@@ -38,6 +40,9 @@ def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_s
       face_info[face_idx]["translated_keypoint"] = keypoint
       face_info[face_idx]["expanded_bbox"] = expanded_bbox
       #face_info[face_idx]["translated_bbox"] = new_bbox
+  if len(face_info) == 0:
+    print("WARNING: Did not detect any faces. Returning non-anonymized images")
+    return anonymized_images
   face_idx_max = max(len(face_info), max(list(face_info.keys())) + 1)
   for face_idx in range(face_idx_max):
     if face_idx not in face_info:
@@ -45,7 +50,7 @@ def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_s
         if face_idx2 in face_info:
           face_info[face_idx2 - 1] = face_info[face_idx2]
           del face_info[face_idx2]
-
+  
   assert len(face_info) == len(face_info.keys())
   torch_faces = torch.empty((len(face_info), 3, imsize, imsize), dtype=torch.float32)
   torch_keypoints = torch.empty((len(face_info), 14), dtype=torch.float32)
@@ -63,7 +68,8 @@ def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_s
       keypoints = torch_utils.to_cuda(keypoints)
       generated_faces = generator(im, keypoints)
       results.append(generated_faces.cpu())
-  
+
+  generated_faces = torch.cat(results)
   face_idx = 0
   jobs = []
   im_to_face_idx = {}
@@ -72,7 +78,7 @@ def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_s
     if im_idx not in im_to_face_idx:
       im_to_face_idx[im_idx] = []
     im_to_face_idx[im_idx].append(face_idx)
-  anonymized_images = []
+  
   for im_idx, face_indices in tqdm.tqdm(im_to_face_idx.items(), desc="Post-processing"):
     im = images[im_idx]
     replaced_mask = np.ones_like(im).astype("bool")
@@ -82,7 +88,7 @@ def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_s
       original_bbox = face_info[face_idx]["face_bbox"]
       im = post_process(im, generated_face, expanded_bbox,
                         original_bbox, replaced_mask)
-    anonymized_images.append(im)
+    anonymized_images[im_idx] = im
   return anonymized_images
   
 
@@ -99,8 +105,6 @@ if __name__ == "__main__":
                                        im_bboxes,
                                        imsize,
                                        generator, 128)
-  print(len(image_paths))
-  print(len(images))
   for im_idx in range(len(image_paths)):
     im = images[im_idx]
     anonymized_image = anonymized_images[im_idx]

@@ -1,5 +1,12 @@
 import os
+import cv2
+import numpy as np
+import torch
+import shutil
 from .infer import read_args
+from .batch_infer import anonymize_images
+from ..detection import detection_api
+from src.visualization import utils as vis_utils
 
 def get_bounding_boxes(source_dir, dataset):
     """
@@ -58,19 +65,18 @@ def get_bounding_boxes(source_dir, dataset):
 
 if __name__ == "__main__":
   generator, imsize, source_path, image_paths, save_path = read_args()
+
   im_bboxes_dict = get_bounding_boxes(source_path, "val")
-  relative_image_paths = list(bounding_boxes.keys())
-  im_bboxes = [im_bboxes_dict[k] for k in relative_image_paths]
+  relative_image_paths = list(im_bboxes_dict.keys())
+  im_bboxes = [np.array(im_bboxes_dict[k]) for k in relative_image_paths]
   image_paths = [os.path.join(source_path, k) for k in relative_image_paths]
   images = [cv2.imread(p)[:, :, ::-1] for p in image_paths]
-  im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(images)
+  im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(images, im_bboxes=im_bboxes)
   anonymized_images = anonymize_images([i.copy() for i in images],
                                        im_keypoints,
                                        im_bboxes,
                                        imsize,
                                        generator, 128)
-  print(len(image_paths))
-  print(len(images))
   for im_idx in range(len(image_paths)):
     im = images[im_idx]
     anonymized_image = anonymized_images[im_idx]
@@ -79,9 +85,15 @@ if __name__ == "__main__":
     annotated_im = vis_utils.draw_faces_with_keypoints(im[:, :, ::-1], face_boxes, keypoints)
     to_save = np.concatenate((annotated_im, anonymized_image[:, :, ::-1]), axis=1)
 
-    relative_path = filepath[len(source_path)+1:]
+    relative_path = filepath[len(source_path)+1:] 
     
     im_savepath = os.path.join(save_path, relative_path)
     print("Saving to:", im_savepath)
     os.makedirs(os.path.dirname(im_savepath), exist_ok=True)
-    cv2.imwrite(im_savepath, to_save)
+    cv2.imwrite(im_savepath+ "_debug.jpg", to_save)
+    cv2.imwrite(im_savepath, anonymized_image[:, :, ::-1])
+  # Copy wider_face_val
+  source_path = os.path.join(source_path, "wider_face_split")
+  target_path = os.path.join(save_path, "wider_face_split")
+  if not os.path.isdir(target_path):
+    shutil.copytree(source_path, target_path)
