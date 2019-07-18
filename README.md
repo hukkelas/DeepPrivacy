@@ -2,7 +2,7 @@
 
 ## Requirements
 - Pytorch  1.0.0
-- Apex
+- NVIDIA Apex (Master branch)
 - Python >= 3.6
 - Apex for pytorch
 - NVIDIA GPU
@@ -12,33 +12,24 @@ Install dependencies
 ```pip install -r requirements.txt``` 
 
 ## Pre-trained model
-
-Download from [https://drive.google.com/open?id=16NeOjlEaJnuH_HWHvFRyGHSGMflO3vvU](Google Drive)
-
-## Dataset download and pre-processing
-1. The dataset is rather large (83GB). Contact either Håkon Hukkelås (hakon.hukkelas@ntnu.no) or Frank Lindseth (frankl@ntnu.no) to retrieve the dataset
-
+Is included with the submission files. Unzip it to models/large_v2/checkpoints
 
 ## Get started 
+
+Start by setting hyperparameters in a config file. These are normally saved under `models/` directory.
 
 To start training a model:
 
 ```bash
-python train.py
+python train.py models/default/config.yml
 ```
 
-Hyperparameters etc can be set with arguments. For a full list of arguments run:
+It will automatically look for previous training checkpoints in `models/default/checkpoints`. 
+
+Additional arguments can be found with:
 
 ```python
 python train.py -h 
-```
-
-
-
-To continue training on a previous model
-
-```bash
-python train.py --model model_name
 ```
 
 Launch tensorboard
@@ -47,22 +38,15 @@ Launch tensorboard
 tensorboard --logdir summaries/
 ```
 
-Run scripts to perform experiments on a trained model from the scripts/ folder. E.g: 
-
-```bash
-python -m scripts.automatic_metric_test
-```
-
-
 ## Automatic inference and anonymization of images
 
 Run
 ```bash
-python -m detectron_scripts.real_image_eval [model_name]
+python -m src.inference.batch_infer [config_path] --source_path /path/to/source/directory --target_path /path/to/taget/directory
 ```
-And it will look for images in the folder `test_examples/real_image/test/source` and output images will be put to: `test_examples/real_image/test/out`
+By default it will look for images in the folder `test_examples`, and images will be saved to the same path as the config file.
 
-**NOTE** This requires detectron to be installed. A pre-defined dockerfile is given in detectron_docker to achieve this.
+
 
 
 ## Get started (Docker)
@@ -75,8 +59,5 @@ docker build -t pytorch-gpu-ext .
 
 2. Run training with docker (Launch in same folder as `train.py`)
 ```bash
-nvidia-docker run --rm  -it -v $PWD:/app  -e CUDA_VISIBLE_DEVICES=1 pytorch-gpu-ext python train.py 
+nvidia-docker run --rm  -it -v $PWD:/app  -e CUDA_VISIBLE_DEVICES=1 pytorch-gpu-ext python train.py models/large_v2/config.yml
 ```
-
-`CUDA_VISIBLE_DEVIES` sets what GPU to use
-`coolImageName` is the docker image to use (created in step 1) 
