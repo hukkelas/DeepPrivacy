@@ -9,11 +9,9 @@ from .infer import pre_process, post_process, read_args
 from ..detection import detection_api
 from src.visualization import utils as vis_utils
 
-
-def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_size):
+def pre_process_faces(images, im_keypoints, im_bboxes, imsize):
   face_info = {}
   face_idx = 0
-  anonymized_images = [im.copy() for im in images]
   with multiprocessing.Pool(1) as pool:
     jobs = []
     for im_idx in range(len(images)):
@@ -39,10 +37,8 @@ def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_s
       face_info[face_idx]["torch_input"] = torch_input
       face_info[face_idx]["translated_keypoint"] = keypoint
       face_info[face_idx]["expanded_bbox"] = expanded_bbox
-      #face_info[face_idx]["translated_bbox"] = new_bbox
   if len(face_info) == 0:
-    print("WARNING: Did not detect any faces. Returning non-anonymized images")
-    return anonymized_images
+    return face_info
   face_idx_max = max(len(face_info), max(list(face_info.keys())) + 1)
   for face_idx in range(face_idx_max):
     if face_idx not in face_info:
@@ -50,8 +46,9 @@ def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_s
         if face_idx2 in face_info:
           face_info[face_idx2 - 1] = face_info[face_idx2]
           del face_info[face_idx2]
-  
-  assert len(face_info) == len(face_info.keys())
+  return face_info
+
+def anonymize_faces(face_info, batch_size, generator, imsize):
   torch_faces = torch.empty((len(face_info), 3, imsize, imsize), dtype=torch.float32)
   torch_keypoints = torch.empty((len(face_info), 14), dtype=torch.float32)
   for face_idx in face_info.keys():
@@ -70,8 +67,10 @@ def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_s
       results.append(generated_faces.cpu())
 
   generated_faces = torch.cat(results)
-  face_idx = 0
-  jobs = []
+  return generated_faces
+
+def batch_post_process(face_info, generated_faces, images):
+  anonymized_images = [im.copy() for im in images]
   im_to_face_idx = {}
   for face_idx, info in face_info.items():
     im_idx = info["im_idx"]
@@ -90,12 +89,16 @@ def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_s
                         original_bbox, replaced_mask)
     anonymized_images[im_idx] = im
   return anonymized_images
+
+def anonymize_images(images, im_keypoints, im_bboxes, imsize, generator, batch_size):
+  face_info = pre_process_faces(images, im_keypoints, im_bboxes, imsize)
+  if len(face_info) == 0:
+    print("WARNING: Did not detect any faces. Returning non-anonymized images")
+    return images
+  generated_faces = anonymize_faces(face_info, batch_size, generator, imsize)
+  anonymized_images = batch_post_process(face_info, generated_faces, images)
+  return anonymized_images
   
-
-
-
-
-
 if __name__ == "__main__":
   generator, imsize, source_path, image_paths, save_path = read_args()
   images = [cv2.imread(p)[:, :, ::-1] for p in image_paths]

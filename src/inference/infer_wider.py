@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import torch
 import shutil
+import tqdm
 from .infer import read_args
 from .batch_infer import anonymize_images
 from ..detection import detection_api
@@ -57,14 +58,39 @@ def get_bounding_boxes(source_dir, dataset):
             y1 = y0 + h
             if  w != 0 and h != 0:
                 bounding_boxes[filepath].append([x0, y0, x1, y1])
-        #if invalid_image:
-            #del bounding_boxes[filepath]
-            #bounding_boxes[filepath] = []
     return bounding_boxes
+
+def anonymize_images_pixelation(images, im_keypoints, im_bboxes, imsize, generator, batch_size, pixelation_size):
+    anonymized_images = []
+    for im_idx, im in enumerate(tqdm.tqdm(images, desc="Anonymizing images")):
+        anonymized_image = im.copy()
+        bboxes = im_bboxes[im_idx]
+        for bbox in bboxes:
+            x0, y0, x1, y1 = bbox
+            face = im[y0:y1, x0:x1]
+            face = cv2.resize(face, (pixelation_size, pixelation_size))
+            face = cv2.resize(face, (x1 - x0, y1 - y0))
+            anonymized_image[y0:y1, x0:x1] = face
+        anonymized_images.append(anonymized_image)
+    return anonymized_images
+
+def anonymize_images_wider(anonymization_type, *args):
+    if anonymization_type == "deep_privacy":
+        print("Anonymization type: DeepPrivacy")
+        return anonymize_images(*args)
+    elif anonymization_type == "pixelation16":
+        print("Anonymization type: Pixelation16")
+        return anonymize_images_pixelation(*args, 16)
+    elif anonymization_type == "pixelation8":
+        print("Anonymization type: Pixelation8")
+        return anonymize_images_pixelation(*args, 8)
+    raise AttributeError
 
 
 if __name__ == "__main__":
-  generator, imsize, source_path, image_paths, save_path = read_args()
+  generator, imsize, source_path, image_paths, save_path, config = read_args([
+      {"name": "anonymization_type", "default": "deep_privacy"}
+  ])
 
   im_bboxes_dict = get_bounding_boxes(source_path, "val")
   relative_image_paths = list(im_bboxes_dict.keys())
@@ -72,7 +98,8 @@ if __name__ == "__main__":
   image_paths = [os.path.join(source_path, k) for k in relative_image_paths]
   images = [cv2.imread(p)[:, :, ::-1] for p in image_paths]
   im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(images, im_bboxes=im_bboxes)
-  anonymized_images = anonymize_images([i.copy() for i in images],
+  anonymized_images = anonymize_images_wider(config.anonymization_type, 
+                                       [i.copy() for i in images],
                                        im_keypoints,
                                        im_bboxes,
                                        imsize,
@@ -85,8 +112,11 @@ if __name__ == "__main__":
     annotated_im = vis_utils.draw_faces_with_keypoints(im[:, :, ::-1], face_boxes, keypoints)
     to_save = np.concatenate((annotated_im, anonymized_image[:, :, ::-1]), axis=1)
 
-    relative_path = filepath[len(source_path)+1:] 
-    
+    splitted_filepath = filepath.split(os.sep)
+    splitted_source_path = os.path.dirname(source_path).split(os.sep)
+    relative_path = splitted_filepath[len(splitted_source_path):]
+    relative_path = os.path.join(*relative_path)
+    print(relative_path)
     im_savepath = os.path.join(save_path, relative_path)
     print("Saving to:", im_savepath)
     os.makedirs(os.path.dirname(im_savepath), exist_ok=True)

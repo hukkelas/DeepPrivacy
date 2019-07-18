@@ -30,3 +30,4 @@ models/old
 anonymized_images/
 .debug/
 transition_checkpoints/
+fid_images/

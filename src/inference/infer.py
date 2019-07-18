@@ -155,11 +155,11 @@ def anonymize_image(im, keypoints, bounding_boxes, generator, imsize, verbose=Fa
     return im
 
 
-def read_args():
+def read_args(additional_args=[]):
     config = config_parser.initialize_and_validate_config([
         {"name": "source_path", "default": "test_examples/source"},
         {"name": "target_path", "default": ""}
-    ])
+    ] + additional_args)
     save_path = config.target_path
     if save_path == "":
         default_path = os.path.join(
@@ -174,6 +174,8 @@ def read_args():
     imsize = ckpt["current_imsize"]
     source_path = config.source_path
     image_paths = get_images_recursive(source_path)
+    if additional_args:
+        return generator, imsize, source_path, image_paths, save_path, config
     return generator, imsize, source_path, image_paths, save_path
 
 
