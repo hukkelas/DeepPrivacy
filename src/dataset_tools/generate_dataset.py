@@ -158,9 +158,9 @@ def extract_and_save_image_batch(impaths, image_annotations, batch_idx):
                 im = cv2.cvtColor(im, cv2.COLOR_GRAY2RGB)
             im = im[:, :, :3]
             im = np.moveaxis(im, 2, 0)
-            im = torch.from_numpy(im)[None]
+            im = torch.from_numpy(im)[None].float()
             im = torch.nn.functional.adaptive_avg_pool2d(im, (imsize, imsize))
-            im = np.moveaxis(im[0].numpy(), 0, 2)
+            im = np.moveaxis(im[0].numpy(), 0, 2).astype(np.uint8)
             assert im.dtype == np.uint8
 
             to_save[i] = im
@@ -212,10 +212,16 @@ def main():
     image_names = get_imnames()
     impaths = []
     image_annotations = []
-    for imname in tqdm.tqdm(image_names, desc="Pre-processing annotations."):
-        annotation, impath = process_image(imname)
-        impaths.append(impath)
-        image_annotations.append(annotation)
+    with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+        jobs = []
+        for imname in image_names:
+            job = pool.apply_async(process_image, (imname, ))
+            jobs.append(job)
+        for job in tqdm.tqdm(jobs, desc="Pre-processing annotations."):
+            
+            annotation, impath = job.get()
+            impaths.append(impath)
+            image_annotations.append(annotation)
     extract_annotations_and_save(image_annotations)
     total_images = [len(x) for x in image_annotations]
     print("Total number of images:", sum(total_images))
