@@ -63,7 +63,28 @@ class PixelwiseNormalization(nn.Module):
         return x / factor
 
 class UpSamplingBlock(nn.Module):
+
     def __init__(self):
         super(UpSamplingBlock, self).__init__()
+
     def forward(self, x):
         return nn.functional.interpolate(x, scale_factor=2)
+
+class MinibatchStdLayer(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, group_size=4):
+        group_size = min(group_size, x.shape[0]) # group_size must be smaller than minibatch size
+        channels, height, width = x.shape[1:]
+        y = x.view(group_size, -1, *x.shape[1:]) # Add extra "group" dimension and let minibatch size compensate
+        y = y.float()
+        y -= y.mean(dim=0, keepdim=True)
+        y = y.pow(2).mean(dim=0)
+        y = (y + 1e-8).sqrt()
+        # Mean over minibatch, height and width
+        y = y.mean(dim=[1, 2, 3], keepdim=True)
+        # Tiling over (mb_size, channels, height, width)
+        y = y.repeat(group_size, 1, height, width)
+        return torch.cat((x, y), dim=1)

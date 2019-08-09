@@ -50,7 +50,7 @@ class Trainer:
         self.model_name = self.checkpoint_dir.split("/")[-2]
         self.config_path = config.config_path
         self.global_step = 0
-
+        self.logger = logger.Logger(config.summaries_dir, config.generated_data_dir)
         # Transition settings
         self.transition_variable = 1.
         self.transition_iters = config.train_config.transition_iters
@@ -70,9 +70,10 @@ class Trainer:
             self.extend_models()
             self.init_optimizers()
         
-        self.logger = logger.Logger(config.summaries_dir, config.generated_data_dir)
+        
 
         self.batch_size = self.batch_size_schedule[self.current_imsize]
+        self.update_running_average_beta()
         self.logger.log_variable("stats/batch_size", self.batch_size)
 
 
@@ -87,12 +88,17 @@ class Trainer:
 
         self.dataloader_train, self.dataloader_val = load_dataset(
             self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.pose_size, self.load_fraction_of_dataset)
+        self.static_z = to_cuda(torch.randn((8, 32, 4, 4)))
         
     def save_transition_checkpoint(self):
         filedir = os.path.join(os.path.dirname(self.config_path), "transition_checkpoints")
         os.makedirs(filedir, exist_ok=True)
         filepath = os.path.join(filedir, f"imsize{self.current_imsize}.ckpt")
         self.save_checkpoint(filepath)
+
+    def update_running_average_beta(self):
+        self.rae_beta = 0.5 **(self.batch_size / (10*1000))
+        self.logger.log_variable("stats/running_average_decay", self.rae_beta)
 
     def save_checkpoint(self, filepath=None):
         if filepath is None:
@@ -176,7 +182,8 @@ class Trainer:
 
         self.current_imsize *= 2
 
-        self.batch_size = self.batch_size_schedule[self.current_imsize] 
+        self.batch_size = self.batch_size_schedule[self.current_imsize]
+        self.update_running_average_beta()
         self.transition_step += 1
 
     def update_running_average_generator(self):
@@ -184,8 +191,8 @@ class Trainer:
                 self.running_average_generator.parameters(),
                 self.generator.parameters()):
             
-            avg_parameter.data = self.running_average_generator_decay*avg_parameter + \
-                ((1-self.running_average_generator_decay) * current_parameter.float())
+            avg_parameter.data = self.rae_beta*avg_parameter + \
+                ((1-self.rae_beta) * current_parameter.float())
 
     def init_optimizers(self):
         self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(),
@@ -208,16 +215,43 @@ class Trainer:
     def save_transition_image(self, before):
         self.dataloader_val.update_next_transition_variable(self.transition_variable)
         real_image, condition, landmark = next(iter(self.dataloader_val))
-
-        fake_data = self.generator(condition, landmark)
-        fake_data = denormalize_img(fake_data.detach())[:8]
-        real_data = denormalize_img(real_image)[:8]
-        condition = denormalize_img(condition)[:8]
+        assert real_image.shape[0] >= 8
+        real_data = real_image[:8]
+        condition = condition[:8]
+        landmark = landmark[:8]
+        fake_data = self.generator(condition, landmark, self.static_z[:8])
+        d_out_real = self.discriminator(real_data, condition, landmark)
+        d_out_fake = self.discriminator(fake_data, condition, landmark)
+        if before:
+            self.d_out_real_before = d_out_real
+            self.d_out_fake_before = d_out_fake
+        fake_data = denormalize_img(fake_data.detach())
+        real_data = denormalize_img(real_data)
+        condition = denormalize_img(condition)
+        
         to_save = torch.cat((real_data, condition, fake_data))
         tag = "before" if before else "after"
+        torch.save(to_save, f".debug/{tag}.torch")
         imsize = self.current_imsize if before else self.current_imsize // 2
         imname = "transition/{}_{}_".format(tag, imsize)
         self.logger.save_images(imname, to_save, log_to_writer=False)
+
+        if not before:
+            im_before = torch.cat([x for x in torch.load(".debug/before.torch")], dim=2)[None]
+            im_after = torch.cat([x for x in torch.load(".debug/after.torch")], dim=2)[None]
+            im_before = torch.nn.functional.interpolate(im_before, scale_factor=2)
+            
+            diff = abs(im_after - im_before)
+            diff = diff / diff.max()
+            
+            to_save = torch.cat((im_before[0], im_after[0], diff[0]), dim=1)
+            self.logger.save_images(f"transition/to_imsize{self.current_imsize}_", to_save, log_to_writer=False)
+
+            diff_real = (d_out_real - self.d_out_real_before).abs().sum()
+            diff_fake = (d_out_fake - self.d_out_fake_before).abs().sum()
+            self.logger.log_variable("transition/discriminator_diff_real", diff_real)
+            self.logger.log_variable("transition/discriminator_diff_fake", diff_fake)
+
 
     def validate_model(self):
         real_scores = []
@@ -281,12 +315,13 @@ class Trainer:
             self.logger.log_variable("amp/loss_scale_{}".format(loss_idx), loss_scaler._loss_scale)
     
     def train_step(self, real_data, condition, landmarks):
-        fake_data = self.generator(condition, landmarks)
+        with torch.no_grad():
+            fake_data = self.generator(condition, landmarks)
         res = self.criterion.step(real_data, fake_data, condition, landmarks)
+        self.total_time = (time.time() - self.start_time) / 60
         if res is None:
             return
         wasserstein_distance, gradient_pen, real_scores, fake_scores, epsilon_penalty = res
-        self.total_time = (time.time() - self.start_time) / 60
         if self.global_step >= self.next_log_point and not amp_state_has_overflow():
             time_spent = time.time() - self.batch_start_time
             nsec_per_img = time_spent / (self.global_step - self.next_log_point + self.num_ims_per_log) 
@@ -365,6 +400,7 @@ class Trainer:
                     self.save_checkpoint()
                     self.next_validation_checkpoint += self.num_ims_per_checkpoint
                     self.validate_model()
+                self.global_step += self.batch_size
                 if self.global_step >= (self.latest_switch + self.transition_iters):
                     self.latest_switch += self.transition_iters
                     if self.is_transitioning:
@@ -399,7 +435,6 @@ class Trainer:
                         # Save image after transition
                         self.save_transition_image(False)
                         break
-                self.global_step += self.batch_size
                 next_transition_value = utils.compute_transition_value(
                     self.global_step + self.batch_size, self.is_transitioning, self.transition_iters
                 )

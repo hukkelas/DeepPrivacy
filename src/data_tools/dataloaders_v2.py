@@ -1,11 +1,13 @@
 import torch
 import os
-import src.utils
+import src.models.utils as model_utils
+import tqdm
 import glob
 import numpy as np
 from torchvision import transforms
 from src.data_tools.data_samplers import ValidationSampler, TrainSampler
 from src.data_tools.data_utils import DataPrefetcher
+
 MAX_VALIDATION_SIZE = 50000
 
 def load_dataset(dataset, batch_size, imsize, full_validation, pose_size, load_fraction=False):
@@ -19,8 +21,8 @@ def load_dataset(dataset, batch_size, imsize, full_validation, pose_size, load_f
     if dataset == "yfcc100m128":
         dirpath = os.path.join("data", "yfcc100m_torch_fix_transition")
         return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
-    if dataset == "yfcc100m128v2":
-        dirpath = os.path.join("data", "yfcc100m128_torch_v2")
+    if dataset == "fdf":
+        dirpath = os.path.join("data", "fdf")
         return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
     raise AssertionError("Dataset was incorrect", dataset)
 
@@ -47,7 +49,6 @@ class DeepPrivacyDataset(torch.utils.data.Dataset):
         landmarks = self.landmarks[index].clone()
         bbox = self.bounding_boxes[index].clone()
         if self.augment_data:
-            bbox = bounding_box_data_augmentation(bbox, self.imsize, 0.02)
             
             if np.random.rand() > 0.5:
                 im = transforms.functional.hflip(im)
@@ -56,8 +57,7 @@ class DeepPrivacyDataset(torch.utils.data.Dataset):
                 bbox[[0, 2]] = self.imsize - bbox[[2, 0]]
         im = np.asarray(im)
         condition = im.copy()
-        condition = cut_bounding_box(condition, bbox, self.is_transitioning)
-
+        condition = cut_bounding_box(condition, bbox, self.transition_variable)
         return im, condition, landmarks
 
     def __len__(self):
@@ -180,17 +180,15 @@ def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
     return bounding_boxes
 
 
-def cut_bounding_box(condition, bounding_boxes, is_transitioning):
+def cut_bounding_box(condition, bounding_boxes, transition_variable):
     bounding_boxes = bounding_boxes.clone()
-    if is_transitioning:
-        bounding_boxes = bounding_boxes // 2 * 2
+    if transition_variable != 1:
+        bounding_boxes_0 = bounding_boxes // 2 * 2
+        bounding_boxes = model_utils.get_transition_value(bounding_boxes_0.float(), bounding_boxes.float(), transition_variable).long()
+
     x0, y0, x1, y1 = [k.item() for k in bounding_boxes]
-    previous_image = condition[y0:y1, x0:x1]
-    if previous_image.size == 0:
+    if  x0 >= x1 or y0 >= y1:
         return condition
-    mean = previous_image.mean()
-    std = previous_image.std()
-    
-    replacement = 128*np.ones(previous_image.shape)
-    previous_image[:, :, :] = replacement.astype(condition.dtype)
+
+    condition[y0:y1, x0:x1, :] = 128
     return condition

@@ -61,14 +61,13 @@ class DataPrefetcher():
     
     def update_next_transition_variable(self, transition_variable):
         self.transition_variable = transition_variable
-        self.dataset.is_transitioning = self.transition_variable != 1.0
+        self.dataset.transition_variable = self.transition_variable
 
 
 def interpolate_image(pool, images, transition_variable):
     assert images.max() > 1
     y = pool(images) // 1
     y = torch.nn.functional.interpolate(y, scale_factor=2)
-
     images = get_transition_value(y, images, transition_variable)
     return images
 
