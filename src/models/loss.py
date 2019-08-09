@@ -77,7 +77,7 @@ class WGANLoss:
             return None
         grad = grad / self.wgan_gp_scaler.loss_scale()
         gradient_pen = ((grad.norm(p=2, dim=1) - 1)**2)
-        to_backward = gradient_pen.mean() * 10 
+        to_backward = gradient_pen.sum() * 10 
         with amp.scale_loss(to_backward, self.d_optimizer, loss_id=1) as scaled_loss:
             scaled_loss.backward(retain_graph=True)
         return gradient_pen.detach().mean()
@@ -100,27 +100,32 @@ class WGANLoss:
         if gradient_pen is None:
             return None
 
-        to_backward1 = (- wasserstein_distance).mean()
+        to_backward1 = (- wasserstein_distance).sum()
         with amp.scale_loss(to_backward1, self.d_optimizer, loss_id=0) as scaled_loss:
             scaled_loss.backward(retain_graph=True)
 
-        to_backward3 = epsilon_penalty.mean() * 0.001
+        to_backward3 = epsilon_penalty.sum() * 0.001
         with amp.scale_loss(to_backward3, self.d_optimizer, loss_id=2) as scaled_loss:
             scaled_loss.backward()
         
         self.d_optimizer.step()
+        fake_data = self.generator(condition, landmarks)
         # Forward G
+        for p in self.discriminator.parameters():
+            p.requires_grad = False
         fake_scores = self.discriminator(
             fake_data, condition, landmarks)
-        G_loss = (-fake_scores).mean()
+        G_loss = (-fake_scores).sum()
 
         
-        self.d_optimizer.zero_grad()
         self.g_optimizer.zero_grad()
         with amp.scale_loss(G_loss, self.g_optimizer, loss_id=3) as scaled_loss:
             scaled_loss.backward()
         self.g_optimizer.step()
+        for p in self.discriminator.parameters():
+            p.requires_grad = True
         return wasserstein_distance.mean().detach(), gradient_pen.mean().detach(), real_scores.mean().detach(), fake_scores.mean().detach(), epsilon_penalty.mean().detach()
+        
 
     
 
