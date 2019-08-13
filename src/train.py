@@ -89,6 +89,7 @@ class Trainer:
         self.dataloader_train, self.dataloader_val = load_dataset(
             self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.pose_size, self.load_fraction_of_dataset)
         self.static_z = to_cuda(torch.randn((8, 32, 4, 4)))
+        self.num_skipped_steps = 0
         
     def save_transition_checkpoint(self):
         filedir = os.path.join(os.path.dirname(self.config_path), "transition_checkpoints")
@@ -116,7 +117,8 @@ class Trainer:
             "running_average_generator": self.running_average_generator.state_dict(),
             "latest_switch": self.latest_switch,
             "current_imsize": self.current_imsize,
-            "transition_step": self.transition_step
+            "transition_step": self.transition_step,
+            "num_skipped_steps": self.num_skipped_steps
         }
         save_checkpoint(state_dict,
                         filepath,
@@ -135,6 +137,7 @@ class Trainer:
             # Tracking stats
             self.global_step = ckpt["global_step"]
             self.start_time = time.time() - ckpt["total_time"] * 60
+            self.num_skipped_steps = ckpt["num_skipped_steps"] if "num_skipped_steps" in ckpt.keys() else 0
             
             # Models
             self.discriminator.load_state_dict(ckpt['D'])
@@ -315,9 +318,11 @@ class Trainer:
             self.logger.log_variable("amp/loss_scale_{}".format(loss_idx), loss_scaler._loss_scale)
     
     def train_step(self, real_data, condition, landmarks):
-        with torch.no_grad():
-            fake_data = self.generator(condition, landmarks)
-        res = self.criterion.step(real_data, fake_data, condition, landmarks)
+        res = self.criterion.step(real_data, condition, landmarks)
+        while res is None:
+            res = self.criterion.step(real_data, condition, landmarks)
+            self.num_skipped_steps += 1
+            self.log_loss_scales()
         self.total_time = (time.time() - self.start_time) / 60
         if res is None:
             return
@@ -357,14 +362,71 @@ class Trainer:
         self.running_average_generator.update_transition_value(self.transition_variable)
 
     def maybe_save_validation_checkpoint(self):
-        validation_checkpoint = 30 * 10**6
-        if self.global_step >= validation_checkpoint and (self.global_step - self.batch_size) < validation_checkpoint:
-            print("Saving global checkpoint for validation")
-            dirname = os.path.join("validation_checkpoints/{}".format(self.model_name))
-            os.makedirs(dirname, exist_ok=True)
-            fpath = os.path.join(dirname, "step_{}.ckpt".format(self.global_step))
-            self.save_checkpoint(fpath)
+        checkpoints = [20 * 10**6, 30 * 10**6, 40 * 10**6, 50 * 10**6]
+        for validation_checkpoint in checkpoints:
+            if self.global_step >= validation_checkpoint and (self.global_step - self.batch_size) < validation_checkpoint:
+                print("Saving global checkpoint for validation")
+                dirname = os.path.join("validation_checkpoints/{}".format(self.model_name))
+                os.makedirs(dirname, exist_ok=True)
+                fpath = os.path.join(dirname, "step_{}.ckpt".format(self.global_step))
+                self.save_checkpoint(fpath)
+
+    def maybe_save_fake_data(self, real_data, condition, landmarks):
+        if self.global_step >= self.next_image_save_point:
+            self.next_image_save_point = self.global_step + self.num_ims_per_save_image
+            self.generator.eval()
+            with torch.no_grad():
+                fake_data_sample = denormalize_img(
+                    self.generator(condition, landmarks).data)
+            self.logger.save_images("fakes", fake_data_sample[:64])
+            # Save input images
+            to_save = denormalize_img(real_data)
+            self.logger.save_images("reals", to_save[:64], log_to_writer=False)
+            to_save = denormalize_img(condition[:64, :3])
+            self.logger.save_images("condition", to_save, log_to_writer=False)
     
+    def maybe_validate_model(self):
+        if self.global_step > self.next_validation_checkpoint:
+            self.save_checkpoint()
+            self.next_validation_checkpoint += self.num_ims_per_checkpoint
+            self.validate_model()
+    
+    def transition_model(self):
+        self.latest_switch += self.transition_iters
+        if self.is_transitioning:
+            # Stop transitioning
+            self.is_transitioning = False
+            self.transition_variable = 1.0
+            self.discriminator.update_transition_value(
+                self.transition_variable)
+            self.generator.update_transition_value(
+                self.transition_variable)
+            self.save_checkpoint()
+        elif self.current_imsize < self.max_imsize:
+            # Save image before transition
+            self.save_transition_checkpoint()
+            self.save_transition_image(True)
+            self.extend_models()
+            del self.dataloader_train, self.dataloader_val
+            self.dataloader_train, self.dataloader_val = load_dataset(
+                self.dataset, self.batch_size, self.current_imsize,
+                self.full_validation, self.pose_size,
+                self.load_fraction_of_dataset)
+            self.is_transitioning = True
+
+            self.init_optimizers()
+            self.transition_variable = 0
+            self.discriminator.update_transition_value(
+                self.transition_variable)
+            self.generator.update_transition_value(
+                self.transition_variable)
+            self.running_average_generator.update_transition_value(
+                self.transition_variable
+            )
+            
+            # Save image after transition
+            self.save_transition_image(False)
+
     def train(self):
         self.batch_start_time = time.time()
         while True:
@@ -375,70 +437,28 @@ class Trainer:
                 self.global_step + self.batch_size, self.is_transitioning, self.transition_iters
             )
             self.dataloader_train.update_next_transition_variable(next_transition_value)
-            for real_data, condition, landmarks in train_iter:
+            for i, (real_data, condition, landmarks) in enumerate(train_iter):
                 self.logger.update_global_step(self.global_step)
-                self.update_transition_value()
+                if i % 4 == 0:
+                    self.update_transition_value()
                 self.train_step(real_data, condition, landmarks)
                 
                 # Log data
                 self.update_running_average_generator()
-                self.maybe_save_validation_checkpoint()    
+                self.maybe_save_validation_checkpoint()
+                self.maybe_save_fake_data(real_data, condition, landmarks)
                 
-                if self.global_step >= self.next_image_save_point:
-                    self.next_image_save_point = self.global_step + self.num_ims_per_save_image
-                    self.generator.eval()
-                    with torch.no_grad():
-                        fake_data_sample = denormalize_img(
-                            self.generator(condition, landmarks).data)
-                    self.logger.save_images("fakes", fake_data_sample[:64])
-                    # Save input images
-                    to_save = denormalize_img(real_data)
-                    self.logger.save_images("reals", to_save[:64], log_to_writer=False)
-                    to_save = denormalize_img(condition[:64, :3])
-                    self.logger.save_images("condition", to_save, log_to_writer=False)
-                if self.global_step > self.next_validation_checkpoint:
-                    self.save_checkpoint()
-                    self.next_validation_checkpoint += self.num_ims_per_checkpoint
-                    self.validate_model()
+
+
                 self.global_step += self.batch_size
                 if self.global_step >= (self.latest_switch + self.transition_iters):
-                    self.latest_switch += self.transition_iters
-                    if self.is_transitioning:
-                        # Stop transitioning
-                        self.is_transitioning = False
-                        self.transition_variable = 1.0
-                        self.discriminator.update_transition_value(
-                            self.transition_variable)
-                        self.generator.update_transition_value(
-                            self.transition_variable)
-                        self.save_checkpoint()
-                    elif self.current_imsize < self.max_imsize:
-                        # Save image before transition
-                        self.save_transition_checkpoint()
-                        self.save_transition_image(True)
-                        self.extend_models()
-                        del self.dataloader_train, self.dataloader_val
-                        self.dataloader_train, self.dataloader_val = load_dataset(
-                            self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.pose_size, self.load_fraction_of_dataset)
-                        self.is_transitioning = True
-
-                        self.init_optimizers()
-                        self.transition_variable = 0
-                        self.discriminator.update_transition_value(
-                            self.transition_variable)
-                        self.generator.update_transition_value(
-                            self.transition_variable)
-                        self.running_average_generator.update_transition_value(
-                            self.transition_variable
-                        )
-                        
-                        # Save image after transition
-                        self.save_transition_image(False)
-                        break
-                next_transition_value = utils.compute_transition_value(
-                    self.global_step + self.batch_size, self.is_transitioning, self.transition_iters
-                )
-                self.dataloader_train.update_next_transition_variable(next_transition_value)
+                    self.transition_model()
+                    break
+                if (i + 1) % 4 == 0:
+                    next_transition_value = utils.compute_transition_value(
+                        self.global_step + self.batch_size, self.is_transitioning, self.transition_iters
+                    )
+                    self.dataloader_train.update_next_transition_variable(next_transition_value)
 
 if __name__ == '__main__':
     config = config_parser.initialize_and_validate_config()
