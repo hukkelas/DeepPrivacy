@@ -17,6 +17,21 @@ if os.path.isfile(image_hash_file):
   with open(image_hash_file, "r") as fp:
     image_hash_to_detections = json.load(fp)
 
+
+def batch_detect_faces(images, face_threshold=0.5):
+  im_bboxes = []
+  for im in tqdm.tqdm(images, desc="Batch detecting faces"):
+    det = get_saved_detection(im)
+    if det is not None:
+      im_bboxes.append(det)
+      continue
+    im_bboxes.append(
+      detect_and_supress(im[:, :, ::-1], face_threshold)
+    )
+    save_detection(im, im_bboxes[-1])
+  return im_bboxes
+    
+  
 def detect_faces_with_keypoints(img, face_threshold=0.5, keypoint_threshold=0.3):
   face_bboxes = detect_and_supress(img[:, :, ::-1], face_threshold)
   keypoints = keypoint_rcnn.detect_keypoints(img, keypoint_threshold)[:, :7, :]
@@ -25,16 +40,7 @@ def detect_faces_with_keypoints(img, face_threshold=0.5, keypoint_threshold=0.3)
 
 def batch_detect_faces_with_keypoints(images, face_threshold=.5, keypoint_threshold=.3, im_bboxes=None):
   if im_bboxes is None:
-    im_bboxes = []
-    for im in tqdm.tqdm(images, desc="Batch detecting faces"):
-      det = get_saved_detection(im)
-      if det is not None:
-        im_bboxes.append(det)
-        continue
-      im_bboxes.append(
-        detect_and_supress(im[:, :, ::-1], face_threshold)
-      )
-      save_detection(im, im_bboxes[-1])
+    im_bboxes = batch_detect_faces(images, face_threshold)
   
   keypoints = keypoint_rcnn.batch_detect_keypoints(images, keypoint_threshold)
   for i in range(len(im_bboxes)):

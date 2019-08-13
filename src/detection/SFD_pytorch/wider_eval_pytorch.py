@@ -95,7 +95,7 @@ def detect_and_supress(img, score_threshold):
         bboxes = bboxes[keep]
         bboxes = bboxes[bboxes[:, 4] >= 0.5] # Remove small faces
         
-        bboxes /= resize_ratio
+        bboxes[:, :4] /= resize_ratio
         scores = bboxes[:, 4]
         bboxes = bboxes[scores > score_threshold, :]
         scores = bboxes[:, 4]

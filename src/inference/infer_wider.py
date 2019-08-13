@@ -120,7 +120,7 @@ if __name__ == "__main__":
     im_savepath = os.path.join(save_path, relative_path)
     print("Saving to:", im_savepath)
     os.makedirs(os.path.dirname(im_savepath), exist_ok=True)
-    cv2.imwrite(im_savepath+ "_debug.jpg", to_save)
+    cv2.imwrite(im_savepath+ "_detection_left_anonymized_right.jpg", to_save)
     cv2.imwrite(im_savepath, anonymized_image[:, :, ::-1])
   # Copy wider_face_val
   source_path = os.path.join(source_path, "wider_face_split")

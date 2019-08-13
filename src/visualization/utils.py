@@ -25,6 +25,17 @@ def draw_faces_with_keypoints(im, bboxes, keypoints, draw_bboxes=True):
     return im.get()
   return im
 
+
+def draw_faces(im, bboxes):
+  for c_idx, bbox in enumerate(bboxes):
+    color = colors[c_idx % len(colors)]
+    x0, y0, x1, y1 = bbox
+    im = cv2.rectangle(im, (x0, y0), (x1, y1), color)
+  if type(im) != np.ndarray:
+    return im.get()
+  return im
+
+
 def np_make_image_grid(images, nrow, pad=2):
   imsize = images[0].shape[0]
   ncol = int(np.ceil(len(images) / 2))
