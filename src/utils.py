@@ -133,8 +133,9 @@ def wrap_models(models):
         return [NetworkWrapper(x) for x in models]
     return NetworkWrapper(models)
 
-def compute_transition_value(global_step, is_transitioning, transition_iters):
+def compute_transition_value(global_step, is_transitioning, transition_iters, latest_switch):
     transition_variable = 1
     if is_transitioning:
-        transition_variable = ( (global_step-1) % transition_iters) / transition_iters
+        diff = global_step - latest_switch
+        transition_variable = diff / transition_iters
     return transition_variable

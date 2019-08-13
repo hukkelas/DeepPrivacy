@@ -314,6 +314,7 @@ class Trainer:
         self.generator.train()
 
     def log_loss_scales(self):
+        self.logger.log_variable("amp/num_skipped_gradients", self.num_skipped_steps)
         for loss_idx, loss_scaler in enumerate(amp._amp_state.loss_scalers):
             self.logger.log_variable("amp/loss_scale_{}".format(loss_idx), loss_scaler._loss_scale)
     
@@ -324,8 +325,6 @@ class Trainer:
             self.num_skipped_steps += 1
             self.log_loss_scales()
         self.total_time = (time.time() - self.start_time) / 60
-        if res is None:
-            return
         wasserstein_distance, gradient_pen, real_scores, fake_scores, epsilon_penalty = res
         if self.global_step >= self.next_log_point and not amp_state_has_overflow():
             time_spent = time.time() - self.batch_start_time
@@ -355,7 +354,8 @@ class Trainer:
             
     def update_transition_value(self):
         self.transition_variable = utils.compute_transition_value(
-            self.global_step, self.is_transitioning, self.transition_iters
+            self.global_step, self.is_transitioning, self.transition_iters,
+            self.latest_switch
         )
         self.discriminator.update_transition_value(self.transition_variable)
         self.generator.update_transition_value(self.transition_variable)
@@ -396,11 +396,8 @@ class Trainer:
         if self.is_transitioning:
             # Stop transitioning
             self.is_transitioning = False
-            self.transition_variable = 1.0
-            self.discriminator.update_transition_value(
-                self.transition_variable)
-            self.generator.update_transition_value(
-                self.transition_variable)
+            self.update_transition_value()
+            print(f"Stopping transition. Global step: {self.global_step}, transition_variable: {self.transition_variable}, Current imsize: {self.current_imsize}")
             self.save_checkpoint()
         elif self.current_imsize < self.max_imsize:
             # Save image before transition
@@ -413,16 +410,11 @@ class Trainer:
                 self.full_validation, self.pose_size,
                 self.load_fraction_of_dataset)
             self.is_transitioning = True
+            print(f"Start transition. Global step: {self.global_step}, transition_variable: {self.transition_variable}, Current imsize: {self.current_imsize}")
 
             self.init_optimizers()
-            self.transition_variable = 0
-            self.discriminator.update_transition_value(
-                self.transition_variable)
-            self.generator.update_transition_value(
-                self.transition_variable)
-            self.running_average_generator.update_transition_value(
-                self.transition_variable
-            )
+            self.update_transition_value()
+            print(f"New transition value: {self.transition_variable}")
             
             # Save image after transition
             self.save_transition_image(False)
@@ -434,7 +426,8 @@ class Trainer:
             self.dataloader_train.update_next_transition_variable(self.transition_variable)
             train_iter = iter(self.dataloader_train)
             next_transition_value = utils.compute_transition_value(
-                self.global_step + self.batch_size, self.is_transitioning, self.transition_iters
+                self.global_step + self.batch_size, self.is_transitioning, self.transition_iters,
+                self.latest_switch
             )
             self.dataloader_train.update_next_transition_variable(next_transition_value)
             for i, (real_data, condition, landmarks) in enumerate(train_iter):
@@ -447,16 +440,16 @@ class Trainer:
                 self.update_running_average_generator()
                 self.maybe_save_validation_checkpoint()
                 self.maybe_save_fake_data(real_data, condition, landmarks)
-                
-
 
                 self.global_step += self.batch_size
                 if self.global_step >= (self.latest_switch + self.transition_iters):
                     self.transition_model()
+                    
                     break
                 if (i + 1) % 4 == 0:
                     next_transition_value = utils.compute_transition_value(
-                        self.global_step + self.batch_size, self.is_transitioning, self.transition_iters
+                        self.global_step + self.batch_size, self.is_transitioning, self.transition_iters,
+                        self.latest_switch
                     )
                     self.dataloader_train.update_next_transition_variable(next_transition_value)
 
