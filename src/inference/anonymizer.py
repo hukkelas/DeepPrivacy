@@ -5,8 +5,7 @@ from src.detection import detection_api
 
 class Anonymizer:
 
-
-    def __init__(self, face_threshold=.3, save_debug=False):
+    def __init__(self, face_threshold=.1, save_debug=False):
         super().__init__()
         self.face_threshold = face_threshold
         self.save_debug = save_debug
@@ -17,11 +16,14 @@ class Anonymizer:
     def anonymize_video(self, video_path, target_path,
                         start_frame=None,
                         end_frame=None):
+        # Read original video
         original_video = mp.VideoFileClip(video_path)
         fps = original_video.fps
         total_frames = int(original_video.duration * original_video.fps)
         start_frame = 0 if start_frame is None else start_frame
         end_frame = total_frames if end_frame is None else end_frame
+        assert start_frame <= end_frame, f"Start frame{start_frame} has to be smaller than end frame {end_frame}"
+        assert end_frame <= total_frames, f"End frame ({end_frame}) is larger than number of frames {total_frames}"
         subclip = original_video.subclip(start_frame/fps, end_frame/fps)
         print("Anonymizing video.")
         print(f"Duration: {original_video.duration}. Total frames: {total_frames}, FPS: {fps}")
@@ -34,16 +36,19 @@ class Anonymizer:
         frames = self.anonymize_images(frames, face_bboxes)
 
         def make_frame(t):
-            frame_idx = int(t * original_video.fps)
+            frame_idx = int(round(t * original_video.fps))
             return frames[frame_idx]
+        
         anonymized_video = mp.VideoClip(make_frame)
         anonymized_video.duration = (end_frame - start_frame) / fps
         anonymized_video.fps = fps
-        anonymized_video = mp.concatenate([
-            original_video.subclip(0, start_frame/fps),
-            anonymized_video,
-            original_video.subclip(end_frame/fps, total_frames/fps)
-        ])
+        to_concatenate = []
+        if start_frame != 0:
+            to_concatenate.append(original_video.subclip(0, start_frame/fps)) 
+        to_concatenate.append(anonymized_video)
+        if end_frame != total_frames:
+            to_concatenate.append(original_video.subclip(end_frame/fps, total_frames/fps))
+        anonymized_video = mp.concatenate(to_concatenate)
 
         anonymized_video.audio = original_video.audio
         print("Anonymized video stats.")
@@ -51,7 +56,7 @@ class Anonymizer:
         print(f"Duration: {anonymized_video.duration}. Total frames: {total_frames}, FPS: {fps}")
         print(f"Anonymizing from: {start_frame}({start_frame/fps}), to: {end_frame}({end_frame/fps})")
 
-        anonymized_video.write_videofile(target_path, fps=original_video.fps)
+        anonymized_video.write_videofile(target_path, fps=original_video.fps, audio_codec='aac')
 
         
 
