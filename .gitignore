@@ -31,3 +31,7 @@ anonymized_images/
 .debug/
 transition_checkpoints/
 fid_images/
+models_old
+inception/
+.fid_cache/
+tensorboard_summaries/

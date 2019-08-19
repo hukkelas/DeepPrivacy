@@ -26,3 +26,7 @@ WORKDIR /workspace
 RUN mkdir /pytorch_models
 ENV TORCH_HOME=/workspace
 RUN pip install imagehash
+RUN apt-get update
+RUN apt install ffmpeg -y 
+#RUN pip install imageio-ffmpeg
+RUN pip install moviepy
