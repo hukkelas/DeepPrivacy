@@ -439,6 +439,7 @@ class Trainer:
                 # Log data
                 self.update_running_average_generator()
                 self.maybe_save_validation_checkpoint()
+                self.maybe_validate_model()
                 self.maybe_save_fake_data(real_data, condition, landmarks)
 
                 self.global_step += self.batch_size

@@ -10,6 +10,7 @@ colors = [hex_to_rgb(x[1:]) for x in colors]
 colors = [(255, 0, 0)] + colors
 
 def draw_faces_with_keypoints(im, bboxes, keypoints, draw_bboxes=True):
+
   if not draw_bboxes:
     bboxes = (None for i in range(len(keypoints)))
   radius = max(int(max(im.shape)*0.0025), 1)
@@ -17,6 +18,7 @@ def draw_faces_with_keypoints(im, bboxes, keypoints, draw_bboxes=True):
     color = colors[c_idx % len(colors)]
     if draw_bboxes:
       x0, y0, x1, y1 = bbox
+      
       im = cv2.rectangle(im, (x0, y0), (x1, y1), color)
     for x,y in keypoint:
       
@@ -29,7 +31,7 @@ def draw_faces_with_keypoints(im, bboxes, keypoints, draw_bboxes=True):
 def draw_faces(im, bboxes):
   for c_idx, bbox in enumerate(bboxes):
     color = colors[c_idx % len(colors)]
-    x0, y0, x1, y1 = bbox
+    x0, y0, x1, y1 = [int(_) for _ in bbox]
     im = cv2.rectangle(im, (x0, y0), (x1, y1), color)
   if type(im) != np.ndarray:
     return im.get()

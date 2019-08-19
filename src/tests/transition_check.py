@@ -1,13 +1,19 @@
-import src.config_parser
+import src.config_parser as config_parser
 import torch
+import os
 import torchvision
 from src.models.unet_model import init_model
 from src.data_tools.dataloaders_v2 import load_dataset
 from src.data_tools.data_utils import denormalize_img
 
-dl_train, _ = load_dataset("yfcc100m128", 64, 8,False, 14, True)
-config = config_parser.load_config("../models/test/config.yml")
-ckpt = torch.load("tests/step_600064.ckpt")
+dl_train, _ = load_dataset("yfcc100m128", 
+                           batch_size=64, 
+                           imsize=64,
+                           full_validation=False, 
+                           pose_size=14, 
+                           load_fraction=True)
+config = config_parser.load_config("models/minibatch_std/config.yml")
+ckpt = torch.load("models/minibatch_std/transition_checkpoints/imsize64.ckpt")
 discriminator, generator = init_model(
     config.models.pose_size,
     config.models.start_channel_size,
@@ -16,21 +22,28 @@ discriminator, generator = init_model(
 )
 generator.load_state_dict(ckpt["G"])
 generator.cuda()
+print(generator.network.current_imsize)
 dl_train.update_next_transition_variable(1.0)
 ims, conditions, landmarks = next(iter(dl_train))
 
 fakes = denormalize_img(generator(conditions, landmarks))
-torchvision.utils.save_image(fakes, "tests/test.jpg")
+os.makedirs(".debug", exist_ok=True)
+torchvision.utils.save_image(fakes, ".debug/test.jpg")
 
 # Extend
 generator.extend()
 generator.cuda()
 generator.transition_value = 0.0
-dl_train, _ = load_dataset("yfcc100m128", 64, 16,False, 14, True)
+dl_train, _ = load_dataset("yfcc100m128", 
+                           batch_size=64, 
+                           imsize=128,
+                           full_validation=False, 
+                           pose_size=14, 
+                           load_fraction=True)
 dl_train.update_next_transition_variable(0.0)
 ims, conditions, landmarks = next(iter(dl_train))
 fakes = denormalize_img(generator(conditions, landmarks))
-torchvision.utils.save_image(fakes, "tests/after.jpg")
+torchvision.utils.save_image(fakes, ".debug/after.jpg")
 
 print("Saved images!")
 #print(generator.network.current_imsize)
