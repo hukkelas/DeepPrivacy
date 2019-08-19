@@ -4,6 +4,7 @@ import imagehash
 import json
 import os
 from PIL import Image
+from .dsfd.detect import get_face_detections
 from .SFD_pytorch.wider_eval_pytorch import detect_and_supress
 from . import keypoint_rcnn
 from .utils import match_bbox_keypoint
@@ -21,14 +22,11 @@ if os.path.isfile(image_hash_file):
 def batch_detect_faces(images, face_threshold=0.5):
   im_bboxes = []
   for im in tqdm.tqdm(images, desc="Batch detecting faces"):
-    det = get_saved_detection(im)
-    if det is not None:
-      im_bboxes.append(det)
-      continue
+    det = get_face_detections(im[:, :, ::-1])
+    det = det[:, :4]
     im_bboxes.append(
-      detect_and_supress(im[:, :, ::-1], face_threshold)
+      get_face_detections(im[:, :, ::-1])[:, :4]
     )
-    save_detection(im, im_bboxes[-1])
   return im_bboxes
     
   
@@ -51,19 +49,3 @@ def batch_detect_faces_with_keypoints(images, face_threshold=.5, keypoint_thresh
     keypoints[i] = face_kps
   write_detections_to_file()
   return im_bboxes, keypoints
-
-def get_saved_detection(im):
-  im = Image.fromarray(im)
-  hash_id = str(imagehash.average_hash(im))
-  if hash_id in image_hash_to_detections:
-    return np.array(image_hash_to_detections[hash_id])
-  return None
-
-def save_detection(im, detection):
-  im = Image.fromarray(im)
-  hash_id = imagehash.average_hash(im)
-  image_hash_to_detections[str(hash_id)] = detection.tolist()
-
-def write_detections_to_file():
-  with open(image_hash_file, "w") as fp:
-    json.dump(image_hash_to_detections, fp)
