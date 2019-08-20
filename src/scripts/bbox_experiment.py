@@ -19,7 +19,7 @@ if __name__ == "__main__":
     os.makedirs(savedir, exist_ok=True)
     num_iterations = 20
     ims_to_save = []
-    percentages = np.linspace(-0.3, 0.3, num_iterations)
+    percentages = [0] + list(np.linspace(-0.3, 0.3, num_iterations))
     z = generator.generate_latent_variable(1, "cuda", torch.float32).zero_()
     for idx in range(-20, -1):
         orig = images[idx]

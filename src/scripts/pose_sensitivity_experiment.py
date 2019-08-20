@@ -1,104 +1,67 @@
-import torch 
-from unet_model import Generator
-import pandas as pd
-from utils import load_checkpoint
-from train import NetworkWrapper, denormalize_img, preprocess_images
-import torchvision
-from dataloaders_v2 import load_dataset_files, cut_bounding_box
-from torchvision.transforms.functional import to_tensor, to_pil_image
-import matplotlib
-matplotlib.use("agg")
-import matplotlib.pyplot as plt
+import torch
 import numpy as np
-import cv2
-from torchvision.transforms.functional import to_tensor
+from src import torch_utils
+from src.visualization import utils as vis_utils
 import os
-#from dataset_tool_new import expand_bounding_box
-from dataset_tools.utils import expand_bounding_box
-from scripts.utils import init_generator, get_model_name, image_to_numpy, plot_pose, draw_bboxes, draw_keypoints
-#from detectron_scripts.infer_simple_v2 import predict_keypoint
-import utils
+from src.inference import infer
+from src.data_tools.dataloaders_v2 import load_dataset_files, cut_bounding_box
+import matplotlib.pyplot as plt
 
-
-
-def draw_keypoints(image, keypoints, colors):
-    image = image.copy()
-    for keypoint in keypoints:
-        X = keypoint[range(0, 14, 2)]
-        Y = keypoint[range(1, 14, 2)]
-        for x, y in zip(X, Y):
-            cv2.circle(image, (x, y), 3, colors)
-    return image
 
 if __name__ == "__main__":
-    model_name = get_model_name()
-    ckpt_path = os.path.join("checkpoints", model_name)
-    ckpt = load_checkpoint(ckpt_path)
-    images, bounding_boxes, landmarks = load_dataset_files("data/yfcc100m128_torch", ckpt["current_imsize"])
-    #images = np.zeros((128, 128, 128, 3))
-    #landmarks = torch.zeros((128, 14))
-    #bounding_boxes = torch.zeros((128, 4))
-    savedir = os.path.join("test_examples", "bounding_box_test")
+    generator, _, _, _, _ = infer.read_args()
+    imsize = generator.current_imsize
+    images, bounding_boxes, landmarks = load_dataset_files("data/fdf", imsize,
+                                                           load_fraction=True)
+
+    batch_size = 128
+
+    savedir = os.path.join(".debug","test_examples", "pose_sensitivity_experiment")
     os.makedirs(savedir, exist_ok=True)
-    os.makedirs(os.path.join(savedir, "out"), exist_ok=True)
-    os.makedirs(os.path.join(savedir, "in"), exist_ok=True)
-    os.makedirs(os.path.join(savedir, "debug"), exist_ok=True)
-    g = init_generator(ckpt)
-    imsize = ckpt["current_imsize"]
-    g.eval()
+    num_iterations = 20
+    ims_to_save = []
+    percentages = [0] + list(np.linspace(-0.3, 0.3, num_iterations-1))
+    z = generator.generate_latent_variable(1, "cuda", torch.float32).zero_()
+    for idx in range(-5, -1):
+        orig = images[idx]
+        orig_pose = landmarks[idx:idx+1]
+        bbox = bounding_boxes[idx].clone()
+        assert orig.dtype == np.uint8
 
-    # Read bounding box annotations
-    idx = -5
+        to_save = orig.copy()
+        to_save = np.tile(to_save, (2, 1, 1))
+
+        truncation_levels = np.linspace(0.00, 3, num_iterations)
+
+        for i in range(num_iterations):
+            im = orig.copy()
+            orig_to_save = im.copy()
+
+            p = percentages[i]
+            pose = orig_pose.clone()
+
+            rand = torch.rand_like(pose) - 0.5
+            rand = (rand / 0.5) * p
+            pose += rand
+
+            im = cut_bounding_box(im, bbox, generator.transition_value)
+
+            keypoints = (pose*imsize).long()
+            keypoints = infer.keypoint_to_numpy(keypoints)
+            orig_to_save = vis_utils.draw_faces_with_keypoints(
+                orig_to_save, None, [keypoints], draw_bboxes=False,
+                radius=3)
+
+            im = torch_utils.image_to_torch(im, cuda=True, normalize_img=True)
+            im = generator(im, pose, z.clone())
+            im = torch_utils.image_to_numpy(im.squeeze(), to_uint8=True, denormalize=True)
+
+            im = np.concatenate((orig_to_save.astype(np.uint8), im), axis=0)
+            to_save = np.concatenate((to_save, im), axis=1)
+        ims_to_save.append(to_save)
+    savepath = os.path.join(savedir, f"result_image.jpg")
     
-    orig = images[idx:idx+1].astype(np.float32) / 255
-    orig_pose = landmarks[idx:idx+1]
-    #print(dataloader.bounding_boxes.shape)
-    x0, y0, x1, y1 = bounding_boxes[idx].numpy()
-    width = x1 - x0
-    height = y1 - y0
-    assert orig.max() <= 1.0
-    num_ims = 10
-    percentages = np.linspace(0.0, 0.1, num_ims)
-    shift = 2
-    final_im = np.ones((imsize*2 + shift, imsize*num_ims + shift*(num_ims-1), 3), dtype=np.uint8) * 255
+    ims_to_save = np.concatenate(ims_to_save, axis=0)
+    plt.imsave(savepath, ims_to_save)
 
-    for i in range(num_ims):
-        p = percentages[i]
-        im = orig.copy()
-        pose = orig_pose.clone()
-        rand = torch.rand(pose.shape) - 0.5
-        rand = rand / 0.5 
-        rand = rand * percentages[i]
-        pose += rand
-        
-        cut_im = im[0].copy()
-        im[0] = cut_bounding_box(im[0], [int(i) for i in [x0, y0, x1, y1]])
-        
-        im = torch.from_numpy(np.rollaxis(im[0],2))[None, :, :, :]
-        print(im.dtype)
-        assert list(im.shape) == [1, 3, imsize, imsize], "Shape was:{}".format(im.shape)
-
-        torchvision.utils.save_image(im.data, "{}/in/{:.3f}.jpg".format(savedir, percentages[i]))
-        to_debug = image_to_numpy(im.squeeze())
-        im = preprocess_images(im, 1.0).cuda()
-        #pose = torch.zeros((1, 14))
-        im = g(im, pose)
-        im = denormalize_img(im)
-        
-        torchvision.utils.save_image(im.data, "{}/out/{:.3f}.jpg".format(savedir, percentages[i]))
-
-        im = image_to_numpy(im.squeeze())
-        to_debug = np.concatenate((to_debug, im), axis=1)
-        plt.figure(figsize=(24, 12))
-        plt.imshow(to_debug)
-        plot_pose(pose.numpy(), imsize, 0)
-        plot_pose(pose.numpy(), imsize, imsize)
-        plt.savefig(os.path.join(savedir, "debug", "{:.3f}.jpg".format(percentages[i])))
-        plt.close()
-        
-        cut_im = draw_keypoints(cut_im, pose*imsize, (255, 0, 0))
-        # Register normal im
-        final_im[:imsize, (imsize+shift)*i:(imsize+shift)*i + imsize, :] = utils.clip(cut_im * 255, 0, 255).astype(np.uint8)
-        final_im[imsize+shift:, (imsize+shift)*i:(imsize+shift)*i + imsize, :] = utils.clip(im * 255, 0, 255).astype(np.uint8)
-    plt.imsave(os.path.join(savedir, "pose_sensitivity.png"), final_im)
     print("Results saved to:", savedir)
