@@ -43,7 +43,6 @@ class DeepPrivacyAnonymizer(Anonymizer):
             generated_face = torch_utils.image_to_numpy(generated_face,
                                                         to_uint8=True,
                                                         denormalize=True)
-            print(torch_input.shape, generated_face.shape)
             to_save = np.concatenate((torch_input, generated_face), axis=1)
             filepath = os.path.join(self.debug_directory, f"face_{face_idx}.jpg")
             cv2.imwrite(filepath, to_save[:, :, ::-1])
@@ -127,4 +126,4 @@ class DeepPrivacyAnonymizer(Anonymizer):
 if __name__ == "__main__":
     generator, imsize, source_path, image_paths, save_path = infer.read_args()
     a = DeepPrivacyAnonymizer(generator, 128, use_static_z=True)
-    a.anonymize_video("test_examples/video/selfie.mp4", "test_examples/video/selfie.mp4", 0, None, True)
+    a.anonymize_video("test_examples/video/selfie.mp4", "test_examples/video/selfie_anonymized.mp4", 0, None, True)

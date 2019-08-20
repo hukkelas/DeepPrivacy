@@ -70,11 +70,6 @@ def interpolate_image(pool, images, transition_variable):
     images = get_transition_value(y, images, transition_variable)
     return images
 
-def preprocess_images(image, transition_variable, pool=torch.nn.AvgPool2d(2, 2)):
-    image = image * 2 - 1
-    image = interpolate_image(pool, image, transition_variable)
-    return image
-
 def denormalize_img(image):
     image = (image+1)/2
     image = torch.clamp(image, 0, 1)

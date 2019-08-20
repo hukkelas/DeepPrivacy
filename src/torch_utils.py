@@ -20,7 +20,7 @@ def image_to_numpy(images, to_uint8=False, denormalize=False):
         return images[0]
     return images
 
-def image_to_torch(image, cuda=True):
+def image_to_torch(image, cuda=True, normalize_img=False):
     if image.dtype == np.uint8:
         image = image.astype(np.float32)
         image /= 255
@@ -32,6 +32,8 @@ def image_to_torch(image, cuda=True):
     if cuda:
         image = to_cuda(image)
     assert image.min() >= 0.0 and image.max() <= 1.0
+    if normalize_img:
+        image = image * 2 - 1
     return image
 
 def to_cuda(elements):

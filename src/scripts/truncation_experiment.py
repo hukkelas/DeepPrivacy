@@ -1,23 +1,32 @@
-import torch
 import numpy as np
-from src import torch_utils
+import matplotlib.pyplot as plt
 import os
+from src import torch_utils
 from src.inference import infer
 from src.data_tools.dataloaders_v2 import load_dataset_files, cut_bounding_box
-import matplotlib.pyplot as plt
+
+
+def truncated_z(z, x_in, generator, truncation_level):
+    if truncation_level == 0:
+        return z.zero_()
+    while z.abs().max() >= truncation_level:
+        mask = (z < - truncation_level) | (z > truncation_level)
+        z[mask] = generator.generate_latent_variable(x_in)[mask]
+    return z
 
 
 if __name__ == "__main__":
     generator, _, _, _, _ = infer.read_args()
     imsize = generator.current_imsize
+    use_truncation = True
+    orig_z = None
+    num_iterations = 20
+
     images, bounding_boxes, landmarks = load_dataset_files("data/fdf", imsize,
                                                            load_fraction=True)
-    savedir = os.path.join(".debug", "test_examples", "z_noise_test")
+    savedir = os.path.join(".debug","test_examples", "z_truncation")
     os.makedirs(savedir, exist_ok=True)
     generator.eval()
-    num_iterations = 20
-    zs = [generator.generate_latent_variable(1, "cuda", torch.float32)
-          for i in range(num_iterations)]
     all_ims = []
     for idx in range(-5, -1):
         orig = images[idx]
@@ -35,16 +44,22 @@ if __name__ == "__main__":
             im = cut_bounding_box(im, bbox, generator.transition_value)
 
             im = torch_utils.image_to_torch(im, cuda=True, normalize_img=True)
-            im = generator(im, pose, zs[i].clone())
+            if use_truncation:
+                truncation_level = truncation_levels[i]
+                if orig_z is None:
+                    orig_z = generator.generate_latent_variable(im)
+                z = truncated_z(orig_z.clone(), im, generator, truncation_level)
+                im = generator(im, pose, z)
+            else:
+                im = generator(im, pose)
 
-            im = torch_utils.image_to_numpy(im.squeeze(), to_uint8=True,
-                                            denormalize=True)
+            im = torch_utils.image_to_numpy(im.squeeze(), to_uint8=True, denormalize=True)
             to_save = np.concatenate((to_save, im), axis=1)
             final_images.append(im)
         all_ims.append(to_save)
     all_ims = np.concatenate(all_ims, axis=0)
 
-    imname = "result_image"
+    imname = "result_image_trunc" if use_truncation else "result_image"
     savepath = os.path.join(savedir, f"{imname}.jpg")
 
     plt.imsave(savepath, all_ims)
