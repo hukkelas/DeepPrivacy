@@ -1,13 +1,16 @@
 import numpy as np
 import torch
 import math
+from src.data_tools import data_utils
 
 
-def image_to_numpy(images, to_uint8=False):
+def image_to_numpy(images, to_uint8=False, denormalize=False):
     single_image = False
     if len(images.shape) == 3:
         single_image = True
         images = images[None]
+    if denormalize:
+        images = data_utils.denormalize_img(images)
     images = images.detach().cpu().numpy()
     r,g,b = images[:, 0], images[:, 1], images[:, 2]
     images = np.stack((r,g,b), axis=3)
@@ -18,13 +21,17 @@ def image_to_numpy(images, to_uint8=False):
     return images
 
 def image_to_torch(image, cuda=True):
+    if image.dtype == np.uint8:
+        image = image.astype(np.float32)
+        image /= 255
+    else:
+        assert image.dtype == np.float32
     image = np.rollaxis(image, 2)
     image = image[None, :, :, :]
-    image = image.astype(np.float32)
-    image = image / image.max()
     image = torch.from_numpy(image)
     if cuda:
         image = to_cuda(image)
+    assert image.min() >= 0.0 and image.max() <= 1.0
     return image
 
 def to_cuda(elements):

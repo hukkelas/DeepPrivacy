@@ -5,17 +5,17 @@ from src.detection import detection_api
 
 class Anonymizer:
 
-    def __init__(self, face_threshold=.1, save_debug=False):
+    def __init__(self, face_threshold=.1):
         super().__init__()
         self.face_threshold = face_threshold
-        self.save_debug = save_debug
 
     def anonymize_images(self, images, im_keypoints, im_bboxes):
         raise NotImplementedError
 
     def anonymize_video(self, video_path, target_path,
                         start_frame=None,
-                        end_frame=None):
+                        end_frame=None,
+                        with_keypoints=False):
         # Read original video
         original_video = mp.VideoFileClip(video_path)
         fps = original_video.fps
@@ -25,15 +25,19 @@ class Anonymizer:
         assert start_frame <= end_frame, f"Start frame{start_frame} has to be smaller than end frame {end_frame}"
         assert end_frame <= total_frames, f"End frame ({end_frame}) is larger than number of frames {total_frames}"
         subclip = original_video.subclip(start_frame/fps, end_frame/fps)
+        print("="*80)
         print("Anonymizing video.")
         print(f"Duration: {original_video.duration}. Total frames: {total_frames}, FPS: {fps}")
         print(f"Anonymizing from: {start_frame}({start_frame/fps}), to: {end_frame}({end_frame/fps})")
 
         frames = list(tqdm.tqdm(subclip.iter_frames(), desc="Reading frames",
                                 total=end_frame - start_frame))
-        face_bboxes = detection_api.batch_detect_faces(frames,
-                                                       self.face_threshold)
-        frames = self.anonymize_images(frames, face_bboxes)
+        if with_keypoints:
+            im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(frames)
+            frames = self.anonymize_images(frames, im_keypoints, im_bboxes)
+        else:
+            im_bboxes = detection_api.batch_detect_faces(frames, self.face_threshold)    
+            frames = self.anonymize_images(frames, im_bboxes)
 
         def make_frame(t):
             frame_idx = int(round(t * original_video.fps))

@@ -11,15 +11,15 @@ def is_height_larger(bbox, image_shape, max_face_size):
     face_size = (y1 - y0) / image_shape[0]
     return face_size >= max_face_size
 
-class PixelationAnonymizer(Anonymizer):
 
+class PixelationAnonymizer(Anonymizer):
 
     def __init__(self, pixelation_size, save_debug=False):
         super().__init__(save_debug=save_debug)
         self.pixelation_size = pixelation_size
         print("Pixelation initialize!")
     
-    def anonymize_images(self, images, im_bboxes, max_face_size=1.0):
+    def anonymize_images(self, images, im_bboxes, im_keypoints=None, max_face_size=1.0):
         anonymized_images = []
         for im_idx, im in enumerate(tqdm.tqdm(images, desc="Anonymizing images")):
             anonymized_image = im.copy()

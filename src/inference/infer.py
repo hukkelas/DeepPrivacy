@@ -37,22 +37,36 @@ def get_images_recursive(image_folder):
                 images.append(impath)
     return images
 
+def to_numpy(el):
+    if isinstance(el, torch.Tensor):
+        return el.numpy()
+    if isinstance(el, list):
+        return np.array(el)
+    return el
+
 def shift_bbox(orig_bbox, expanded_bbox, new_imsize):
+    orig_bbox = to_numpy(orig_bbox).astype(float)
+    expanded_bbox = to_numpy(expanded_bbox).astype(float)
+
     x0, y0, x1, y1 = orig_bbox
     x0e, y0e, x1e, y1e = expanded_bbox
     x0, x1 = x0 - x0e, x1 - x0e
     y0, y1 = y0 - y0e, y1 - y0e
     w_ = x1e - x0e
-    x0, y0, x1, y1 = [int(k/w_*new_imsize) for k in [x0, y0, x1, y1]]
+    x0, y0, x1, y1 = [int(k*new_imsize/w_) for k in [x0, y0, x1, y1]]
+    bbox = np.array([x0, y0, x1, y1]).astype(int)
     return [x0, y0, x1, y1]
 
 def keypoint_to_torch(keypoint):
-    keypoint = np.array([keypoint[i, j] for i in range(keypoint.shape[0]) for j in range(2) ])
+    keypoint = np.array([keypoint[i, j] for i in range(keypoint.shape[0]) for j in range(2)])
     keypoint = torch.from_numpy(keypoint).view(1, -1)
     return keypoint
 
+def keypoint_to_numpy(keypoint):
+    return keypoint.view(-1, 2).numpy()
+
 def shift_and_scale_keypoint(keypoint, expanded_bbox):
-    keypoint = keypoint.copy()
+    keypoint = keypoint.copy().astype(float)
     keypoint[:, 0] -= expanded_bbox[0]
     keypoint[:, 1] -= expanded_bbox[1]
     w = expanded_bbox[2] - expanded_bbox[0]
@@ -86,45 +100,102 @@ def anonymize_face(im, keypoints, generator):
         generated = generator(im, keypoints)
     return generated
 
+def cut_image(im, bbox):
+    x0, y0, x1, y1 = bbox
+    if x0 < 0:
+        pad_im = np.zeros((im.shape[0], abs(x0), im.shape[2]), dtype=np.uint8)
+        im = np.concatenate((pad_im, im), axis=1)
+        x1 += abs(x0)
+        x0 = 0
+    if y0 < 0:
+        pad_im = np.zeros((abs(y0), im.shape[1], im.shape[2]), dtype=np.uint8)
+        im = np.concatenate((pad_im, im), axis=0)
+        y1 += abs(y0)
+        y0 = 0
+    if x1 >= im.shape[1]:
+        pad_im = np.zeros((im.shape[0], x1 - im.shape[1] + 1, im.shape[2]), dtype=np.uint8)
+        im = np.concatenate((im, pad_im), axis=1)
+    if y1 >= im.shape[0]:
+        pad_im = np.zeros((y1 - im.shape[0] + 1, im.shape[1], im.shape[2]), dtype=np.uint8)
+        im = np.concatenate((im, pad_im), axis=0)
+    return im[y0:y1, x0:x1]
+
+def expand_bbox_simple(bbox, percentage):
+    x0, y0, x1, y1 = bbox.astype(float)
+    width = x1 - x0
+    height = y1 - y0
+    x_c = int(x0) + width//2
+    y_c = int(y0) + height//2
+    avg_size = max(width, height)
+    new_width = avg_size * (1 + percentage)
+    x0 = x_c - new_width//2
+    y0 = y_c - new_width//2
+    x1 = x_c + new_width//2
+    y1 = y_c + new_width//2
+    return np.array([x0, y0, x1, y1]).astype(int)
+
+
 def pre_process(im, keypoint, bbox, imsize, cuda=True):
+    bbox = to_numpy(bbox)
     try:
-        x0e,  y0e, we, he = expand_bounding_box(*bbox, 0.35, im.shape)
-        x1e = x0e + we
-        y1e = y0e + he
+        expanded_bbox = expand_bbox_simple(bbox, 0.4)
     except AssertionError as e:
         print("Could not process image, bbox error", e)
         return None
-    expanded_bbox = [x0e, y0e, x1e, y1e]
-    to_replace = im[y0e:y1e, x0e:x1e]
-    orig_shape = to_replace.shape
+    to_replace = cut_image(im, expanded_bbox)
     new_bbox = shift_bbox(bbox, expanded_bbox, imsize)
     new_keypoint = shift_and_scale_keypoint(keypoint, expanded_bbox)
     to_replace = cv2.resize(to_replace, (imsize, imsize))
-    to_replace = cut_bounding_box(to_replace.copy(), torch.tensor(new_bbox), False)
+    to_replace = cut_bounding_box(to_replace.copy(), torch.tensor(new_bbox), 1.0)
     to_replace = torch_utils.image_to_torch(to_replace, cuda=cuda)
     keypoint = keypoint_to_torch(new_keypoint)
     torch_input = to_replace * 2 - 1
     return torch_input, keypoint, expanded_bbox, new_bbox
 
-def post_process(im, generated_face, expanded_bbox, original_bbox, image_mask, verbose=False):
-    generated_face = denormalize_img(generated_face)
-    generated_face = torch_utils.image_to_numpy(generated_face[0], to_uint8=True)
-    orig_imsize = expanded_bbox[2] - expanded_bbox[0]
-    #if verbose:
-        #generator_input = torch_utils.image_to_numpy((torch_input[0]+1)/2, to_uint8=True)
-        #save_debug_image(generator_input, generator_input,
-        #                 generated_face, keypoints, bbox)
-    generated_face = cv2.resize(generated_face, (orig_imsize, orig_imsize))
-
-    # Stitch generated face to original image
-    
+def stitch_face(im, expanded_bbox, generated_face, bbox_to_extract, image_mask, original_bbox):
+    # Ugly but works....
     x0e, y0e, x1e, y1e = expanded_bbox
+    x0o, y0o, x1o, y1o = bbox_to_extract
+    
     mask_single_face = image_mask[y0e:y1e, x0e:x1e]
     to_replace = im[y0e:y1e, x0e:x1e]
+    generated_face = generated_face[y0o:y1o, x0o:x1o]
     to_replace[mask_single_face] = generated_face[mask_single_face]
     im[y0e:y1e, x0e:x1e] = to_replace
     x0, y0, x1, y1 = original_bbox
     image_mask[y0:y1, x0:x1, :] = 0
+    return im
+
+def replace_face(im, generated_face, image_mask, original_bbox):
+    original_bbox = to_numpy(original_bbox)
+    expanded_bbox = expand_bbox_simple(original_bbox, 0.4)
+    assert expanded_bbox[2] - expanded_bbox[0] == generated_face.shape[1], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
+    assert expanded_bbox[3] - expanded_bbox[1] == generated_face.shape[0], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
+
+    bbox_to_extract = np.array([0, 0, generated_face.shape[1], generated_face.shape[0]])
+    for i in range(2):
+        if expanded_bbox[i] < 0:
+            bbox_to_extract[i] -= expanded_bbox[i]
+            expanded_bbox[i] = 0
+    if expanded_bbox[2] > im.shape[1]:
+        diff = expanded_bbox[2] - im.shape[1]
+        bbox_to_extract[2] -= diff
+        expanded_bbox[2] = im.shape[1]
+    if expanded_bbox[3] > im.shape[0]:
+        diff = expanded_bbox[3] - im.shape[0]
+        bbox_to_extract[3] -= diff
+        expanded_bbox[3] = im.shape[0]
+
+    im = stitch_face(im, expanded_bbox, generated_face, bbox_to_extract, image_mask, original_bbox)
+    return im
+
+
+def post_process(im, generated_face, expanded_bbox, original_bbox, image_mask):
+    generated_face = denormalize_img(generated_face)
+    generated_face = torch_utils.image_to_numpy(generated_face[0], to_uint8=True)
+    orig_imsize = expanded_bbox[2] - expanded_bbox[0]
+    generated_face = cv2.resize(generated_face, (orig_imsize, orig_imsize))
+    im = replace_face(im, generated_face, image_mask, original_bbox)
     return im
 
 
