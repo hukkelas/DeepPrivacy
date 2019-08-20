@@ -31,7 +31,6 @@ class DataPrefetcher():
             self.next_condition = interpolate_image(self.pool,
                                                     self.next_condition,
                                                     self.transition_variable)
-            
             self.next_image = self.next_image / 255
             self.next_image = self.next_image*2 - 1
 
@@ -79,6 +78,4 @@ def preprocess_images(image, transition_variable, pool=torch.nn.AvgPool2d(2, 2))
 def denormalize_img(image):
     image = (image+1)/2
     image = torch.clamp(image, 0, 1)
-    image = image.clamp()
-    image = utils.clip(image, 0, 1)
     return image

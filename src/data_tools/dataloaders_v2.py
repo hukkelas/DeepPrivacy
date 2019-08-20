@@ -49,7 +49,7 @@ class DeepPrivacyDataset(torch.utils.data.Dataset):
         landmarks = self.landmarks[index].clone()
         bbox = self.bounding_boxes[index].clone()
         if self.augment_data:
-            
+            bbox = bounding_box_data_augmentation(bbox, self.imsize, 2/100)
             if np.random.rand() > 0.5:
                 im = transforms.functional.hflip(im)
                 x = landmarks[range(0, landmarks.shape[0], 2)]
@@ -181,6 +181,7 @@ def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
 
 
 def cut_bounding_box(condition, bounding_boxes, transition_variable):
+    assert 1 <= condition.max()  <= 255
     bounding_boxes = bounding_boxes.clone()
     if transition_variable != 1:
         bounding_boxes_0 = bounding_boxes // 2 * 2

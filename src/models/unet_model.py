@@ -1,4 +1,4 @@
-from src.models.discriminator import Discriminator
+from src.models.discriminator import Discriminator, DeepDiscriminator
 from src.models.generator import Generator
 from src.utils import wrap_models
 

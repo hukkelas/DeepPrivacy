@@ -1,22 +1,22 @@
-import time
 import os
+import time
+
+import apex
 import numpy as np
 import torch
-from apex import amp
 import torchvision
-from src import utils
-from src.torch_utils import to_cuda
-from src.utils import load_checkpoint, save_checkpoint, amp_state_has_overflow, wrap_models
-from src.models.generator import Generator
-from src.models.unet_model import init_model
+import tqdm
+from apex import amp
+from src import config_parser, logger, utils
+from src.data_tools.data_utils import denormalize_img
 from src.data_tools.dataloaders_v2 import load_dataset
-from src import config_parser
 from src.metrics import fid
 from src.models import loss
-import tqdm
-import apex
-from src.data_tools.data_utils import denormalize_img
-from src import logger 
+from src.models.generator import Generator
+from src.models.unet_model import init_model
+from src.torch_utils import to_cuda
+from src.utils import (amp_state_has_overflow, load_checkpoint,
+                       save_checkpoint, wrap_models)
 
 if False:
     torch.manual_seed(0)
@@ -122,7 +122,7 @@ class Trainer:
         }
         save_checkpoint(state_dict,
                         filepath,
-                        max_keep=2)
+                        max_keep=2 if not "validation_checkpoints" in filepath else 5)
 
     def load_checkpoint(self):
         try:
@@ -362,7 +362,7 @@ class Trainer:
         self.running_average_generator.update_transition_value(self.transition_variable)
 
     def maybe_save_validation_checkpoint(self):
-        checkpoints = [20 * 10**6, 30 * 10**6, 40 * 10**6, 50 * 10**6]
+        checkpoints = [12*10**6, 20 * 10**6, 30 * 10**6, 40 * 10**6, 50 * 10**6]
         for validation_checkpoint in checkpoints:
             if self.global_step >= validation_checkpoint and (self.global_step - self.batch_size) < validation_checkpoint:
                 print("Saving global checkpoint for validation")

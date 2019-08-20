@@ -101,7 +101,7 @@ class Discriminator(ProgressiveBaseModel):
         return x
 
 
-class DeepDiscriminator(nn.Module):
+class DeepDiscriminator(ProgressiveBaseModel):
 
     def __init__(self, 
                  image_channels,
