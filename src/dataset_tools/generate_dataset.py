@@ -4,13 +4,14 @@ import cv2
 import multiprocessing
 import torch
 import math
-from src.dataset_tools.utils import expand_bounding_box, read_json, is_keypoint_within_bbox
+import argparse
 import numpy as np
 from PIL import Image
-import matplotlib.pyplot as plt 
+from src.dataset_tools.utils import (expand_bounding_box, read_json,
+                                     is_keypoint_within_bbox,
+                                     expand_bbox_simple, pad_image)
 
-TARGET_DIR = "data/yfcc100m_torch_fix_transition"
-os.makedirs(TARGET_DIR, exist_ok=True)
+TARGET_DIR = "data/test"
 IMAGE_TARGET_DIR = os.path.join(TARGET_DIR, "original")
 os.makedirs(IMAGE_TARGET_DIR, exist_ok=True)
 BBOX_TARGET_DIR = os.path.join(TARGET_DIR, "bounding_box")
@@ -18,6 +19,7 @@ os.makedirs(BBOX_TARGET_DIR, exist_ok=True)
 LANDMARK_TARGET_DIR = os.path.join(TARGET_DIR, "landmarks")
 os.makedirs(LANDMARK_TARGET_DIR, exist_ok=True)
 
+np.random.seed(0)
 IMAGE_SOURCE_DIR = "/work/haakohu/yfcc100m/images2"
 LANDMARKS_PATH = "/lhome/haakohu/flickr_download/annotations_keypoints.json"
 BBOX_PATH = "/lhome/haakohu/flickr_download/annotations.json"
@@ -25,7 +27,16 @@ BBOX_JSON = read_json(BBOX_PATH)
 LANDMARKS_JSON = read_json(LANDMARKS_PATH)
 BBOX_EXPANSION_FACTOR = 0.35
 MIN_BBOX_SIZE = 128
-TARGET_IMSIZES = [4, 8, 16, 32, 64, 128]
+parser = argparse.ArgumentParser()
+parser.add_argument("--max_imsize", default=128, type=int)
+parser.add_argument("--min_imsize", default=4, type=int)
+parser.add_argument("--simple_expand", default=True, action="store_false",
+                    help="Expands the face bounding box from the center. Can include black borders.")
+args = parser.parse_args()
+if args.simple_expand:
+    BBOX_EXPANSION_FACTOR = .4
+num_sizes = int(math.log(args.max_imsize/args.min_imsize, 2))
+TARGET_IMSIZES = [args.min_imsize * (2**k) for k in range(1, num_sizes+1)]
 
 
 def get_imnames():
@@ -42,16 +53,13 @@ def match_bbox_keypoint(bounding_boxes, keypoints):
         keypoints: [N persons, (X, Y, Score, ?), K Keypoints]
     """
     if len(bounding_boxes) == 0 or len(keypoints) == 0:
-        return None, None 
+        return None, None
     assert bounding_boxes.shape[1] == 5, "Shape was : {}".format(bounding_boxes.shape)
     assert keypoints.shape[1:] == (4, 7), "Keypoint shape was: {}".format(keypoints.shape)
     # Sort after score
     sorted_idx = np.argsort(bounding_boxes[:, 4])[::-1]
     bounding_boxes = bounding_boxes[sorted_idx]
 
-    # Sort after keypoint confidence?
-    scores = [kp[2].sum() for kp in keypoints]
-    sorted_idx = np.argsort(scores)[::-1]
     matches = []
     bounding_boxes = bounding_boxes[:, :4]
     keypoints = keypoints[:, :2]
@@ -71,29 +79,29 @@ def match_bbox_keypoint(bounding_boxes, keypoints):
 def process_face(bbox, landmark, imshape):
     assert bbox.shape == (4,), "Was shape: {}".format(bbox.shape)
     assert landmark.shape == (2, 7), "Was shape: {}".format(landmark.shape)
-    
-    try:
-        x0, y0, width, height = expand_bounding_box(*bbox, BBOX_EXPANSION_FACTOR, imshape)
-        x0 = int(x0)
-        y0 = int(y0)
-        width = int(width)
-        height = int(height)
-    except AssertionError as e:
-        print("Did not finish:", e)
-        return None
+    if args.simple_expand:
+        x0, y0, x1, y1 = expand_bbox_simple(bbox, BBOX_EXPANSION_FACTOR)
+    else:
+        try:
+            x0, y0, w, h = expand_bounding_box(*bbox, BBOX_EXPANSION_FACTOR, imshape)
+            x1 = x0 + w
+            y1 = y0 + h
+            x0, y0, x1, y1 = [int(_) for _ in [x0, y0, x1, y1]]
+        except AssertionError:
+            return None
+    width = x1 - x0
     if width < MIN_BBOX_SIZE:
         return None
     bbox[[0, 2]] -= x0
     bbox[[1, 3]] -= y0
-    assert width == height
+    assert width == y1 - y0, f"width: {width}, height: {y1-y0}"
     bbox = bbox.astype("int")
     landmark[0] -= x0
     landmark[1] -= y0
-    landmark = landmark
     landmark = np.array([landmark[j, i] for i in range(landmark.shape[1]) for j in range(2)])
     return {
-        "expanded_bbox": np.array([x0, y0, x0+width, y0+height]),
-        "face_bbox": bbox.astype("int"),
+        "expanded_bbox": np.array([x0, y0, x1, y1]),
+        "face_bbox": bbox,
         "landmark": landmark.flatten()
     }
 
@@ -102,20 +110,6 @@ def process_image(imname):
     impath = os.path.join(IMAGE_SOURCE_DIR, imname)
     bounding_boxes = np.array(BBOX_JSON[imname])
     landmarks = np.array(LANDMARKS_JSON[imname]["cls_keyps"])
-    if False:
-        plt.imshow(plt.imread(impath))
-        for bbox in bounding_boxes:
-            x0, y0, x1, y1 = bbox[:4]
-            x = [x0, x0, x1, x1, x0]
-            y = [y0, y1, y1, y0, y0]
-            plt.plot(x,y)
-        for kp in landmarks:
-            x = kp[0,:]
-            y = kp[1, :]
-            plt.plot(x,y, ".")
-        os.makedirs("debug", exist_ok=True)
-        plt.savefig("debug/" + imname)
-        plt.clf()
     bounding_boxes, landmarks = match_bbox_keypoint(bounding_boxes, landmarks)
     if bounding_boxes is None:
         return [], impath
@@ -127,48 +121,54 @@ def process_image(imname):
     imshape = (imshape[1], imshape[0], *imshape[2:])
     resulting_annotation = []
     for bbox, landmark in zip(bounding_boxes, landmarks):
-
-        face_res = process_face(bbox, landmark, imshape)
+        bbox[0] = max(0, bbox[0])
+        bbox[1] = max(0, bbox[1])
+        bbox[2] = min(imshape[1], bbox[2])
+        bbox[3] = min(imshape[0], bbox[3])
+        face_res = process_face(bbox.copy(), landmark, imshape)
         if face_res is not None:
             resulting_annotation.append(face_res)
     return resulting_annotation, impath
 
 
+def pool(img):
+    img = img.astype(np.float32)
+    img = (img[0::2, 0::2] + img[0::2, 1::2] + img[1::2, 0::2] + img[1::2, 1::2]) * 0.25
+    img = img.astype(np.uint8)
+    return img
+
+
 def extract_and_save_image_batch(impaths, image_annotations, batch_idx):
     images = []
     for impath in impaths:
-        images.append(np.array(Image.open(impath)))
-        #plt.imsave(os.path.join("lol", os.path.basename(impath)), plt.imread(impath))
+        images.append(np.array(Image.open(impath).convert("RGB")))
     extracted_faces = []
     for image, annotations in zip(images, image_annotations):
         for annotation in annotations:
             x0, y0, x1, y1 = annotation["expanded_bbox"]
-            cut_im = image[y0:y1, x0:x1]
+            if args.simple_expand:
+                cut_im = pad_image(image, [x0, y0, x1, y1])
+            else:
+                cut_im = image[y0:y1, x0:x1]
             extracted_faces.append(cut_im)
     max_imsize = TARGET_IMSIZES[-1]
     extracted_faces = [
         cv2.resize(im, (max_imsize, max_imsize), interpolation=cv2.INTER_AREA)
         for im in extracted_faces
     ]
-    for imsize in TARGET_IMSIZES:
-        to_save = np.zeros((len(extracted_faces), imsize, imsize, 3), dtype=np.uint8)
-        
-        for i, im in enumerate(extracted_faces):
-            if len(im.shape) == 2:
-                im = cv2.cvtColor(im, cv2.COLOR_GRAY2RGB)
-            im = im[:, :, :3]
-            im = np.moveaxis(im, 2, 0)
-            im = torch.from_numpy(im)[None].float()
-            im = torch.nn.functional.adaptive_avg_pool2d(im, (imsize, imsize))
-            im = np.moveaxis(im[0].numpy(), 0, 2).astype(np.uint8)
-            assert im.dtype == np.uint8
-
-            to_save[i] = im
+    to_save = [np.zeros((len(extracted_faces), imsize, imsize, 3), dtype=np.uint8)
+               for imsize in TARGET_IMSIZES]
+    for im_idx, im in enumerate(extracted_faces):
+        for imsize_idx in range(len(TARGET_IMSIZES)-1, -1, -1):
+            assert im.shape == (TARGET_IMSIZES[imsize_idx], TARGET_IMSIZES[imsize_idx], 3), f'Imsize was: {im.shape}'
+            to_save[imsize_idx][im_idx] = im
+            im = pool(im)
+    for faces, imsize in zip(to_save, TARGET_IMSIZES):
+        assert faces.shape[1:] == (imsize, imsize, 3), f'Shape was: {faces.shape}'
         target_dir = os.path.join(IMAGE_TARGET_DIR, str(imsize))
         os.makedirs(target_dir, exist_ok=True)
-        target_path = os.path.join(target_dir,
-                                   "{}.npy".format(str(batch_idx)))
-        np.save(target_path, to_save)
+        target_path = os.path.join(target_dir, f"{batch_idx}.npy")
+        np.save(target_path, faces)
 
 
 def save_annotation(bounding_boxes, landmarks, sizes):
@@ -186,7 +186,7 @@ def save_annotation(bounding_boxes, landmarks, sizes):
 
         landmark_to_save = normalized_landmark / sizes * imsize
         landmark_to_save = torch.from_numpy(landmark_to_save)
-        
+
         target_path = os.path.join(LANDMARK_TARGET_DIR, "{}.torch".format(imsize))
         torch.save(landmark_to_save, target_path)
 
@@ -195,7 +195,7 @@ def extract_annotations_and_save(image_annotations):
     bounding_boxes = []
     landmarks = []
     sizes = []
-    for annotations in image_annotations:
+    for annotations in tqdm.tqdm(image_annotations, desc="Saving annotations"):
         for annotation in annotations:
             bounding_boxes.append(annotation["face_bbox"])
             landmarks.append(annotation["landmark"])
@@ -218,7 +218,6 @@ def main():
             job = pool.apply_async(process_image, (imname, ))
             jobs.append(job)
         for job in tqdm.tqdm(jobs, desc="Pre-processing annotations."):
-            
             annotation, impath = job.get()
             impaths.append(impath)
             image_annotations.append(annotation)

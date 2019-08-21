@@ -6,7 +6,7 @@ from ..data_tools import data_utils
 from src import config_parser, utils
 from src.models.generator import Generator
 from src.detection.detection_api import detect_faces_with_keypoints
-from src.dataset_tools.utils import expand_bounding_box
+from src.dataset_tools import utils as dataset_utils
 from src.data_tools.dataloaders_v2 import cut_bounding_box
 from src.data_tools.data_utils import denormalize_img
 import src.torch_utils as torch_utils
@@ -37,12 +37,14 @@ def get_images_recursive(image_folder):
                 images.append(impath)
     return images
 
+
 def to_numpy(el):
     if isinstance(el, torch.Tensor):
         return el.numpy()
     if isinstance(el, list):
         return np.array(el)
     return el
+
 
 def shift_bbox(orig_bbox, expanded_bbox, new_imsize):
     orig_bbox = to_numpy(orig_bbox).astype(float)
@@ -57,13 +59,16 @@ def shift_bbox(orig_bbox, expanded_bbox, new_imsize):
     bbox = np.array([x0, y0, x1, y1]).astype(int)
     return [x0, y0, x1, y1]
 
+
 def keypoint_to_torch(keypoint):
     keypoint = np.array([keypoint[i, j] for i in range(keypoint.shape[0]) for j in range(2)])
     keypoint = torch.from_numpy(keypoint).view(1, -1)
     return keypoint
 
+
 def keypoint_to_numpy(keypoint):
     return keypoint.view(-1, 2).numpy()
+
 
 def shift_and_scale_keypoint(keypoint, expanded_bbox):
     keypoint = keypoint.copy().astype(float)
@@ -72,6 +77,7 @@ def shift_and_scale_keypoint(keypoint, expanded_bbox):
     w = expanded_bbox[2] - expanded_bbox[0]
     keypoint /= w
     return keypoint
+
 
 def save_debug_image(original_image, input_image, generated, keypoints, bbox, expanded_bbox):
     x0e, y0e, x1e, y1e = expanded_bbox
@@ -87,7 +93,7 @@ def save_debug_image(original_image, input_image, generated, keypoints, bbox, ex
     debug_path = os.path.join(debug_path, f"{imname}_{face_idx}.jpg")
     x = keypoints[0, range(0, len(keypoints[0]), 2)]
     y = keypoints[0, range(1, len(keypoints[0]), 2)]
-    keypoints = (torch.stack((x,y), dim=1) * original_image.shape[0])[None, :]
+    keypoints = (torch.stack((x, y), dim=1) * original_image.shape[0])[None, :]
     original_image = vis_utils.draw_faces_with_keypoints(original_image,
                                                          bbox[None, :],
                                                          keypoints,
@@ -95,54 +101,21 @@ def save_debug_image(original_image, input_image, generated, keypoints, bbox, ex
     image = np.concatenate((original_image, input_image, generated), axis=1)
     cv2.imwrite(debug_path, image[:, :, ::-1])
 
+
 def anonymize_face(im, keypoints, generator):
     with torch.no_grad():
         generated = generator(im, keypoints)
     return generated
 
-def cut_image(im, bbox):
-    x0, y0, x1, y1 = bbox
-    if x0 < 0:
-        pad_im = np.zeros((im.shape[0], abs(x0), im.shape[2]), dtype=np.uint8)
-        im = np.concatenate((pad_im, im), axis=1)
-        x1 += abs(x0)
-        x0 = 0
-    if y0 < 0:
-        pad_im = np.zeros((abs(y0), im.shape[1], im.shape[2]), dtype=np.uint8)
-        im = np.concatenate((pad_im, im), axis=0)
-        y1 += abs(y0)
-        y0 = 0
-    if x1 >= im.shape[1]:
-        pad_im = np.zeros((im.shape[0], x1 - im.shape[1] + 1, im.shape[2]), dtype=np.uint8)
-        im = np.concatenate((im, pad_im), axis=1)
-    if y1 >= im.shape[0]:
-        pad_im = np.zeros((y1 - im.shape[0] + 1, im.shape[1], im.shape[2]), dtype=np.uint8)
-        im = np.concatenate((im, pad_im), axis=0)
-    return im[y0:y1, x0:x1]
-
-def expand_bbox_simple(bbox, percentage):
-    x0, y0, x1, y1 = bbox.astype(float)
-    width = x1 - x0
-    height = y1 - y0
-    x_c = int(x0) + width//2
-    y_c = int(y0) + height//2
-    avg_size = max(width, height)
-    new_width = avg_size * (1 + percentage)
-    x0 = x_c - new_width//2
-    y0 = y_c - new_width//2
-    x1 = x_c + new_width//2
-    y1 = y_c + new_width//2
-    return np.array([x0, y0, x1, y1]).astype(int)
-
 
 def pre_process(im, keypoint, bbox, imsize, cuda=True):
     bbox = to_numpy(bbox)
     try:
-        expanded_bbox = expand_bbox_simple(bbox, 0.4)
+        expanded_bbox = dataset_utils.expand_bbox_simple(bbox, 0.4)
     except AssertionError as e:
         print("Could not process image, bbox error", e)
         return None
-    to_replace = cut_image(im, expanded_bbox)
+    to_replace = dataset_utils.pad_image(im, expanded_bbox)
     new_bbox = shift_bbox(bbox, expanded_bbox, imsize)
     new_keypoint = shift_and_scale_keypoint(keypoint, expanded_bbox)
     to_replace = cv2.resize(to_replace, (imsize, imsize))
@@ -152,11 +125,12 @@ def pre_process(im, keypoint, bbox, imsize, cuda=True):
     torch_input = to_replace * 2 - 1
     return torch_input, keypoint, expanded_bbox, new_bbox
 
+
 def stitch_face(im, expanded_bbox, generated_face, bbox_to_extract, image_mask, original_bbox):
     # Ugly but works....
     x0e, y0e, x1e, y1e = expanded_bbox
     x0o, y0o, x1o, y1o = bbox_to_extract
-    
+
     mask_single_face = image_mask[y0e:y1e, x0e:x1e]
     to_replace = im[y0e:y1e, x0e:x1e]
     generated_face = generated_face[y0o:y1o, x0o:x1o]
@@ -166,9 +140,10 @@ def stitch_face(im, expanded_bbox, generated_face, bbox_to_extract, image_mask, 
     image_mask[y0:y1, x0:x1, :] = 0
     return im
 
+
 def replace_face(im, generated_face, image_mask, original_bbox):
     original_bbox = to_numpy(original_bbox)
-    expanded_bbox = expand_bbox_simple(original_bbox, 0.4)
+    expanded_bbox = dataset_utils.expand_bbox_simple(original_bbox, 0.4)
     assert expanded_bbox[2] - expanded_bbox[0] == generated_face.shape[1], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
     assert expanded_bbox[3] - expanded_bbox[1] == generated_face.shape[0], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
 
