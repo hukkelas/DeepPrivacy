@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+import sys
+import os
+import random
+gpu_id = sys.argv[1]
+internal_cmd = " ".join(sys.argv[2:])
+
+model_name = internal_cmd
+rm_cmd = ""
+try:
+    start_idx = model_name.index(" models/") + len(" models/")
+    end_idx = model_name[start_idx:].index("/") + start_idx
+    model_name = model_name[start_idx:end_idx]
+except ValueError:
+    print("Did not find model name. giving the model a random name and removing the container.")
+    rm_cmd = " --rm "
+    model_name = str(random.randint(0, 10000))
+
+
+print("Model name:", model_name)
+
+filedir = os.path.dirname(os.path.abspath(__file__))
+    
+docker_container = "haakohu_{}".format(model_name)
+os.system("docker rm {}".format(docker_container))
+command = "nvidia-docker run --name {} --ipc=host{}\
+        -v /dev/log:/home/haakohu/DeepPrivacy/log -u 1174424 -v {}:/workspace  \
+           -e CUDA_VISIBLE_DEVICES={}  --log-opt max-size=50m\
+          -it  haakohu/pytorch  {}".format(
+            docker_container,
+            rm_cmd,
+            filedir,
+            gpu_id,
+            internal_cmd
+        )
+print(command)
+os.system(command)
