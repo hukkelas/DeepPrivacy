@@ -10,6 +10,7 @@ from src.data_tools.data_utils import DataPrefetcher
 
 MAX_VALIDATION_SIZE = 50000
 
+
 def load_dataset(dataset, batch_size, imsize, full_validation, pose_size, load_fraction=False):
     if dataset == "celeba":
         raise NotImplementedError

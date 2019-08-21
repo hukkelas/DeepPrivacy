@@ -223,21 +223,3 @@ def read_args(additional_args=[]):
     if additional_args:
         return generator, imsize, source_path, image_paths, save_path, config
     return generator, imsize, source_path, image_paths, save_path
-
-
-if __name__ == "__main__":
-    generator, imsize, source_path, image_paths, save_path = read_args()
-    
-    for filepath in image_paths:
-        im = cv2.imread(filepath)
-        face_boxes, keypoints = detect_faces_with_keypoints(im[:, :, ::-1], keypoint_threshold=0.5)
-        anonymized_image = anonymize_image(im[:, :,::-1], keypoints, face_boxes, generator, imsize, verbose=True)
-        annotated_im = vis_utils.draw_faces_with_keypoints(im, face_boxes, keypoints)
-        to_save = np.concatenate((annotated_im, anonymized_image[:, :, ::-1]), axis=1)
-
-        relative_path = filepath[len(source_path)+1:]
-        
-        im_savepath = os.path.join(save_path, relative_path)
-        print("Saving to:", im_savepath)
-        os.makedirs(os.path.dirname(im_savepath), exist_ok=True)
-        cv2.imwrite(im_savepath, to_save)

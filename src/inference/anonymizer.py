@@ -1,5 +1,10 @@
 import moviepy.editor as mp
 import tqdm
+import os
+import cv2
+import numpy as np
+from src.visualization import utils as vis_utils
+from src.inference import infer
 from src.detection import detection_api
 
 
@@ -11,6 +16,31 @@ class Anonymizer:
 
     def anonymize_images(self, images, im_keypoints, im_bboxes):
         raise NotImplementedError
+
+    def anonymize_folder(self, folder_path, save_path):
+        if folder_path.endswith("/"):
+            folder_path = folder_path[:-1]
+        image_paths = infer.get_images_recursive(folder_path)
+        images = [cv2.imread(p)[:, :, ::-1] for p in image_paths]
+
+        im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(images)
+        anonymized_images = self.anonymize_images(images, 
+                                                  im_keypoints,
+                                                  im_bboxes)
+
+        for image_idx, (impath, anon_im) in enumerate(zip(image_paths,
+                                                          anonymized_images)):
+            
+            relative_path = impath[len(folder_path)+1:]
+            new_path = os.path.join(save_path, relative_path)
+            annotated_im = vis_utils.draw_faces_with_keypoints(
+                images[image_idx],
+                im_bboxes[image_idx],
+                im_keypoints[image_idx]
+            )
+            to_save = np.concatenate((annotated_im, anon_im), axis=1)
+            os.makedirs(os.path.dirname(new_path), exist_ok=True)
+            cv2.imwrite(new_path, to_save[:, :, ::-1])
 
     def anonymize_video(self, video_path, target_path,
                         start_frame=None,
@@ -60,8 +90,7 @@ class Anonymizer:
         print(f"Duration: {anonymized_video.duration}. Total frames: {total_frames}, FPS: {fps}")
         print(f"Anonymizing from: {start_frame}({start_frame/fps}), to: {end_frame}({end_frame/fps})")
 
-        anonymized_video.write_videofile(target_path, fps=original_video.fps, audio_codec='aac')
-
-        
+        anonymized_video.write_videofile(target_path, fps=original_video.fps,
+                                         audio_codec='aac')
 
 
