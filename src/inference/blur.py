@@ -1,8 +1,6 @@
 import tqdm
 import cv2
 from src.inference.anonymizer import Anonymizer
-from .batch_infer import pre_process_faces
-from .batch_infer import batch_post_process
 from src.visualization import utils as vis_utils
 
 

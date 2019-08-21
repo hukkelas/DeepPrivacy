@@ -2,15 +2,14 @@ import os
 import cv2
 import torch
 import numpy as np
-from ..data_tools import data_utils
 from src import config_parser, utils
 from src.models.generator import Generator
-from src.detection.detection_api import detect_faces_with_keypoints
 from src.dataset_tools import utils as dataset_utils
 from src.data_tools.dataloaders_v2 import cut_bounding_box
 from src.data_tools.data_utils import denormalize_img
 import src.torch_utils as torch_utils
 from src.visualization import utils as vis_utils
+
 
 def init_generator(config, ckpt):
     g = Generator(
@@ -22,6 +21,7 @@ def init_generator(config, ckpt):
     g.eval()
     torch_utils.to_cuda(g)
     return g
+
 
 def get_images_recursive(image_folder):
     endings = [".jpg", ".jpeg", ".png"]
@@ -102,11 +102,6 @@ def save_debug_image(original_image, input_image, generated, keypoints, bbox, ex
     cv2.imwrite(debug_path, image[:, :, ::-1])
 
 
-def anonymize_face(im, keypoints, generator):
-    with torch.no_grad():
-        generated = generator(im, keypoints)
-    return generated
-
 
 def pre_process(im, keypoint, bbox, imsize, cuda=True):
     bbox = to_numpy(bbox)
@@ -171,33 +166,6 @@ def post_process(im, generated_face, expanded_bbox, original_bbox, image_mask):
     orig_imsize = expanded_bbox[2] - expanded_bbox[0]
     generated_face = cv2.resize(generated_face, (orig_imsize, orig_imsize))
     im = replace_face(im, generated_face, image_mask, original_bbox)
-    return im
-
-
-def anonymize_image(im, keypoints, bounding_boxes, generator, imsize, verbose=False):
-    im = im.copy()
-    if len(keypoints) == 0:
-        return im.copy()
-    replaced_mask = np.ones_like(im).astype("bool")
-    global face_idx
-    face_idx = 0
-    for keypoint, original_bbox in zip(keypoints, bounding_boxes):
-        res = pre_process(im, keypoint, original_bbox, imsize)
-        if res is None:
-            continue
-        to_replace, keypoint, expanded_bbox, shifted_bbox = res
-        generated_face = anonymize_face(to_replace, keypoint, generator)
-        im = post_process(im, generated_face, expanded_bbox, original_bbox, replaced_mask)
-        face_idx += 1
-        if verbose:
-            save_debug_image(
-                im,
-                torch_utils.image_to_numpy(data_utils.denormalize_img(to_replace)[0], to_uint8=True),
-                torch_utils.image_to_numpy(data_utils.denormalize_img(generated_face)[0], to_uint8=True),
-                keypoint,
-                shifted_bbox,
-                expanded_bbox
-            )
     return im
 
 
