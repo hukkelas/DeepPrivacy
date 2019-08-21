@@ -23,7 +23,8 @@ class Anonymizer:
         image_paths = infer.get_images_recursive(folder_path)
         images = [cv2.imread(p)[:, :, ::-1] for p in image_paths]
 
-        im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(images)
+        im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(images,
+                                                                                  face_threshold=self.face_threshold)
         anonymized_images = self.anonymize_images(images, 
                                                   im_keypoints,
                                                   im_bboxes)

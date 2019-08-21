@@ -1,5 +1,6 @@
 import torch
 import math
+from . import torch_utils
 from torchvision.ops.boxes import nms
 
 
@@ -63,7 +64,6 @@ class Detect:
             conf_scores = conf_scores[indices]
             if conf_scores.dim() == 0:
                 final_ouput.append(torch.empty(0, 5))
-                continue
             keep_idx = nms(decoded_boxes, conf_scores, nms_threshold)
 
             scores = conf_scores[keep_idx].view(1, -1, 1)
@@ -71,8 +71,6 @@ class Detect:
             output = torch.cat((scores, boxes), dim=-1)
             final_ouput.append(output)
         if num == 1:
-            if len(final_ouput[0]) == 0:
-                return torch.empty((1, 0, 5))
             return final_ouput[0]
         final_ouput = torch.cat(final_ouput, dim=0)
         return final_ouput
@@ -142,6 +140,7 @@ class PriorBox(object):
                 
         # back to torch land
         output = torch.Tensor(mean).view(-1, 4)
+        output = torch_utils.to_cuda(output)
         if self.clip:
             output.clamp_(max=1, min=0)
         return output

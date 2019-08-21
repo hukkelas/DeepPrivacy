@@ -57,7 +57,7 @@ def initialize_and_validate_config(additional_arguments=[]):
         parser.add_argument(f'--{additional_arg["name"]}', default=additional_arg["default"])
 
     args = parser.parse_args()
-    assert os.path.isfile(args.config_path), "Did not find config file:".format(args.config_path)
+    assert os.path.isfile(args.config_path), "Did not find config file: {}".format(args.config_path)
 
     config = load_config(args.config_path)
     
