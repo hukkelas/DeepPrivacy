@@ -5,7 +5,7 @@ import torch
 import tqdm
 import os
 from PIL import Image
-from src.torch_utils import to_cuda
+from src.torch_utils import to_cuda, image_to_torch
 from torchvision.models.detection import keypointrcnn_resnet50_fpn
 from apex import amp
 
@@ -23,10 +23,7 @@ if os.path.isfile(image_hash_file):
     image_hash_to_detections = json.load(fp)
 
 def detect_keypoints(img, keypoint_threshold=.3):
-  img = np.rollaxis(img, 2) 
-  img = img / img.max()
-  img = torch.from_numpy(img).float()
-  img = to_cuda(img)
+  img = image_to_torch(img, cuda=True)[0]
   with torch.no_grad():
     outputs = model([img])
   
@@ -41,9 +38,7 @@ def detect_keypoints(img, keypoint_threshold=.3):
 def batch_detect_keypoints(images, keypoint_threshold=.3):
   orig_images = images
   detections = [get_saved_detection(im, keypoint_threshold) for im in images]
-  images = [np.moveaxis(im, 2, 0) / im.max() for im, det in zip(images, detections) if det is None]
-
-  images = [torch.from_numpy(im).float() for im in images]
+  images = [image_to_torch(im, cuda=False)[0] for im, det in zip(images, detections) if det is None]
   batch_size = 32
   keypoints = []
   scores = []
@@ -52,9 +47,9 @@ def batch_detect_keypoints(images, keypoint_threshold=.3):
     with torch.no_grad():
       for i in tqdm.trange(num_batches, desc="Keypoint inference"):
         images_ = images[i*batch_size:(i+1)*batch_size]
-        images_ = [to_cuda(i) for i in images_]
+        images_ = [to_cuda(_) for _ in images_]
         outputs = model(images_)
-        images_ = [i.cpu() for i in images_]
+        images_ = [_.cpu() for _ in images_]
         keypoints += [o["keypoints"].cpu() for o in outputs]
         scores += [o["scores"].cpu() for o in outputs]
   for i in range(len(scores)):

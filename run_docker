@@ -20,11 +20,14 @@ except ValueError:
 print("Model name:", model_name)
 
 filedir = os.path.dirname(os.path.abspath(__file__))
-    
-docker_container = "haakohu_{}".format(model_name)
+if "train" in internal_cmd:
+    docker_container = "haakohu_{}_train".format(model_name)
+else:
+    docker_container = "haakohu_{}_other".format(model_name)
 os.system("docker rm {}".format(docker_container))
 command = "nvidia-docker run --name {} --ipc=host{}\
         -v /dev/log:/home/haakohu/DeepPrivacy/log -u 1174424 -v {}:/workspace  \
+            -v /work/haakohu/deep_privacy/data/celeba_numpy/:/workspace/data/celeba_numpy/ \
            -e CUDA_VISIBLE_DEVICES={}  --log-opt max-size=50m\
           -it  haakohu/pytorch  {}".format(
             docker_container,

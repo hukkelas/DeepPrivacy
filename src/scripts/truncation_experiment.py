@@ -10,7 +10,7 @@ def truncated_z(z, x_in, generator, truncation_level):
     if truncation_level == 0:
         return z.zero_()
     while z.abs().max() >= truncation_level:
-        mask = (z < - truncation_level) | (z > truncation_level)
+        mask = z.abs() >= truncation_level
         z[mask] = generator.generate_latent_variable(x_in)[mask]
     return z
 

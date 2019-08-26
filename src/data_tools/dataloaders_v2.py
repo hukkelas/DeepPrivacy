@@ -13,7 +13,8 @@ MAX_VALIDATION_SIZE = 50000
 
 def load_dataset(dataset, batch_size, imsize, full_validation, pose_size, load_fraction=False):
     if dataset == "celeba":
-        raise NotImplementedError
+        dirpath = os.path.join("data", "celeba_numpy")
+        return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
     if dataset == "ffhq":
         raise NotImplementedError
     if dataset == "yfcc100m":

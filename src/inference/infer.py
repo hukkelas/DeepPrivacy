@@ -102,15 +102,24 @@ def save_debug_image(original_image, input_image, generated, keypoints, bbox, ex
     cv2.imwrite(debug_path, image[:, :, ::-1])
 
 
+SIMPLE_EXPAND = False
 
 def pre_process(im, keypoint, bbox, imsize, cuda=True):
     bbox = to_numpy(bbox)
-    try:
+    if SIMPLE_EXPAND:
         expanded_bbox = dataset_utils.expand_bbox_simple(bbox, 0.4)
-    except AssertionError as e:
-        print("Could not process image, bbox error", e)
-        return None
-    to_replace = dataset_utils.pad_image(im, expanded_bbox)
+        to_replace = dataset_utils.pad_image(im, expanded_bbox)
+    else:
+        try:
+            x0, y0, w, h = dataset_utils.expand_bounding_box(*bbox, 0.35,
+                                                              im.shape)
+            expanded_bbox = np.array([x0, y0, x0+w, y0+h])
+
+            to_replace = im[y0:y0+h, x0:x0+w]
+        except AssertionError as e:
+            print("Could not process image, bbox error", e)
+            expanded_bbox = dataset_utils.expand_bbox_simple(bbox, 0.7)
+            to_replace = dataset_utils.pad_image(im, expanded_bbox)
     new_bbox = shift_bbox(bbox, expanded_bbox, imsize)
     new_keypoint = shift_and_scale_keypoint(keypoint, expanded_bbox)
     to_replace = cv2.resize(to_replace, (imsize, imsize))
@@ -136,9 +145,8 @@ def stitch_face(im, expanded_bbox, generated_face, bbox_to_extract, image_mask, 
     return im
 
 
-def replace_face(im, generated_face, image_mask, original_bbox):
+def replace_face(im, generated_face, image_mask, original_bbox, expanded_bbox):
     original_bbox = to_numpy(original_bbox)
-    expanded_bbox = dataset_utils.expand_bbox_simple(original_bbox, 0.4)
     assert expanded_bbox[2] - expanded_bbox[0] == generated_face.shape[1], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
     assert expanded_bbox[3] - expanded_bbox[1] == generated_face.shape[0], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
 
@@ -165,7 +173,7 @@ def post_process(im, generated_face, expanded_bbox, original_bbox, image_mask):
     generated_face = torch_utils.image_to_numpy(generated_face[0], to_uint8=True)
     orig_imsize = expanded_bbox[2] - expanded_bbox[0]
     generated_face = cv2.resize(generated_face, (orig_imsize, orig_imsize))
-    im = replace_face(im, generated_face, image_mask, original_bbox)
+    im = replace_face(im, generated_face, image_mask, original_bbox, expanded_bbox)
     return im
 
 
