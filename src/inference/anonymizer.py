@@ -10,38 +10,50 @@ from src.detection import detection_api
 
 class Anonymizer:
 
-    def __init__(self, face_threshold=.1):
+    def __init__(self, face_threshold=.1, keypoint_threshold=.3):
         super().__init__()
         self.face_threshold = face_threshold
+        self.keypoint_threshold = keypoint_threshold
 
     def anonymize_images(self, images, im_keypoints, im_bboxes):
         raise NotImplementedError
 
-    def anonymize_folder(self, folder_path, save_path):
+    def anonymize_folder(self, folder_path, save_path, im_bboxes=None):
         if folder_path.endswith("/"):
             folder_path = folder_path[:-1]
         image_paths = infer.get_images_recursive(folder_path)
-        images = [cv2.imread(p)[:, :, ::-1] for p in image_paths]
 
-        im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(images,
-                                                                                  face_threshold=self.face_threshold)
+        relative_paths = [impath[len(folder_path)+1:] for impath in image_paths]
+        save_paths = [os.path.join(save_path, impath) for impath in relative_paths]
+        self.anonymize_image_paths(image_paths, save_paths, im_bboxes=im_bboxes)
+
+    def anonymize_image_paths(self, image_paths, save_paths, im_bboxes=None):
+        images = [cv2.imread(p)[:, :, ::-1] for p in image_paths]
+        im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(
+            images, im_bboxes=im_bboxes,
+            keypoint_threshold=self.keypoint_threshold,
+            face_threshold=self.face_threshold
+        )
+
         anonymized_images = self.anonymize_images(images, 
                                                   im_keypoints,
                                                   im_bboxes)
 
-        for image_idx, (impath, anon_im) in enumerate(zip(image_paths,
-                                                          anonymized_images)):
-            
-            relative_path = impath[len(folder_path)+1:]
-            new_path = os.path.join(save_path, relative_path)
+        for image_idx, (new_path, anon_im) in enumerate(zip(save_paths,
+                                                            anonymized_images)):
+            os.makedirs(os.path.dirname(new_path), exist_ok=True)
+
             annotated_im = vis_utils.draw_faces_with_keypoints(
                 images[image_idx],
                 im_bboxes[image_idx],
                 im_keypoints[image_idx]
             )
+            cv2.imwrite(new_path, anon_im[:, :, ::-1])
+
             to_save = np.concatenate((annotated_im, anon_im), axis=1)
-            os.makedirs(os.path.dirname(new_path), exist_ok=True)
-            cv2.imwrite(new_path, to_save[:, :, ::-1])
+            debug_impath = new_path.split(".")[0] + "_detected_left_anonymized_right.jpg"
+            cv2.imwrite(debug_impath, to_save[:, :, ::-1])
+
 
     def anonymize_video(self, video_path, target_path,
                         start_frame=None,
@@ -93,5 +105,3 @@ class Anonymizer:
 
         anonymized_video.write_videofile(target_path, fps=original_video.fps,
                                          audio_codec='aac')
-
-
