@@ -36,7 +36,7 @@ for ims, condition, landmarks in dl:
     l = [keypoint1d_to_2d(l).cpu().numpy()]
     im = data_utils.denormalize_img(im)
     im = torch_utils.image_to_numpy(im, to_uint8=True)
-    im = vis_utils.draw_faces_with_keypoints(im, None,l, False)
+    im = vis_utils.draw_faces_with_keypoints(im, None,l)
     c = data_utils.denormalize_img(c)
     c = torch_utils.image_to_numpy(c, to_uint8=True)
     to_save_ims.append(im)

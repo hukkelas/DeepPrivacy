@@ -49,7 +49,7 @@ if __name__ == "__main__":
             keypoints = (pose*imsize).long()
             keypoints = infer.keypoint_to_numpy(keypoints)
             orig_to_save = vis_utils.draw_faces_with_keypoints(
-                orig_to_save, None, [keypoints], draw_bboxes=False,
+                orig_to_save, None, [keypoints],
                 radius=3)
 
             im = torch_utils.image_to_torch(im, cuda=True, normalize_img=True)

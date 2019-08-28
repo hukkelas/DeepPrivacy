@@ -10,7 +10,7 @@ from src.data_tools.dataloaders_v2 import load_dataset_files, cut_bounding_box
 if __name__ == "__main__":
     generator, _, _, _, _ = infer.read_args()
     imsize = generator.current_imsize
-    images, bounding_boxes, landmarks = load_dataset_files("data/fdf", imsize,
+    images, bounding_boxes, landmarks = load_dataset_files("data/yfcc100m_torch_fix_transition", imsize,
                                                            load_fraction=True)
     batch_size = 128
     anonymizer = deep_privacy_anonymizer.DeepPrivacyAnonymizer(generator,
