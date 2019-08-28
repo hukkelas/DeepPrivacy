@@ -63,7 +63,8 @@ class Detect:
 
             conf_scores = conf_scores[indices]
             if conf_scores.dim() == 0:
-                final_ouput.append(torch.empty(0, 5))
+                final_ouput.append(torch.empty(1, 0, 5))
+                continue
             keep_idx = nms(decoded_boxes, conf_scores, nms_threshold)
 
             scores = conf_scores[keep_idx].view(1, -1, 1)

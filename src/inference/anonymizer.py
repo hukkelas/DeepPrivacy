@@ -77,14 +77,20 @@ class Anonymizer:
                                 total=end_frame - start_frame))
         if with_keypoints:
             im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(frames)
-            frames = self.anonymize_images(frames, im_keypoints, im_bboxes)
+            anonymized_frames = self.anonymize_images(frames, im_keypoints, im_bboxes)
         else:
-            im_bboxes = detection_api.batch_detect_faces(frames, self.face_threshold)    
-            frames = self.anonymize_images(frames, im_bboxes)
+            im_bboxes = detection_api.batch_detect_faces(frames, self.face_threshold)
+            im_keypoints = None
+            anonymized_frames = self.anonymize_images(frames, im_bboxes)
 
         def make_frame(t):
             frame_idx = int(round(t * original_video.fps))
-            return frames[frame_idx]
+            anonymized_frame = anonymized_frames[frame_idx]
+            orig_frame = frames[frame_idx]
+            orig_frame = vis_utils.draw_faces_with_keypoints(
+                orig_frame, im_bboxes[frame_idx], im_keypoints[frame_idx],
+                radius=10)
+            return np.concatenate((orig_frame, anonymized_frame), axis=1)
         
         anonymized_video = mp.VideoClip(make_frame)
         anonymized_video.duration = (end_frame - start_frame) / fps

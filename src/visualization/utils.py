@@ -17,20 +17,22 @@ def draw_faces_with_keypoints(
         im,
         im_bboxes,
         im_keypoints,
-        draw_bboxes=True,
         radius=None
         ):
-
-    if not draw_bboxes:
-        im_bboxes = (None for i in range(len(im_keypoints)))
+    if im_keypoints is None:
+        assert im_bboxes is not None, "Image bboxes cannot be None."
+        im_keypoints = [None for i in range(len(im_bboxes))]
+    if im_bboxes is None:
+        im_bboxes = [None for i in range(len(im_keypoints))]
     if radius is None:
         radius = max(int(max(im.shape)*0.0025), 1)
     for c_idx, (bbox, keypoint) in enumerate(zip(im_bboxes, im_keypoints)):
         color = colors[c_idx % len(colors)]
-        if draw_bboxes:
+        if bbox is not None:
             x0, y0, x1, y1 = bbox
-
             im = cv2.rectangle(im, (x0, y0), (x1, y1), color)
+        if keypoint is None:
+            continue
         for x, y in keypoint:
             im = cv2.circle(im, (int(x), int(y)), radius, color)
     if type(im) != np.ndarray:

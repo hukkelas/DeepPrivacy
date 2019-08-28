@@ -95,9 +95,8 @@ def save_debug_image(original_image, input_image, generated, keypoints, bbox, ex
     y = keypoints[0, range(1, len(keypoints[0]), 2)]
     keypoints = (torch.stack((x, y), dim=1) * original_image.shape[0])[None, :]
     original_image = vis_utils.draw_faces_with_keypoints(original_image,
-                                                         bbox[None, :],
-                                                         keypoints,
-                                                         draw_bboxes=False)
+                                                         None,
+                                                         keypoints)
     image = np.concatenate((original_image, input_image, generated), axis=1)
     cv2.imwrite(debug_path, image[:, :, ::-1])
 
