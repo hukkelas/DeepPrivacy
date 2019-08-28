@@ -23,7 +23,8 @@ def detect(net,img):
     img = img.reshape((1,)+img.shape)
 
     img = torch.from_numpy(img).float().cuda()
-    olist = net(img)
+    with torch.no_grad():
+        olist = net(img)
 
     bboxlist = []
     for i in range(len(olist)//2): 
@@ -51,7 +52,8 @@ def detect(net,img):
 
 def flip_detect(net,img):
     img = cv2.flip(img, 1)
-    b = detect(net,img)
+    with torch.no_grad():
+        b = detect(net,img)
 
     bboxlist = np.zeros(b.shape)
     bboxlist[:, 0] = img.shape[1] - b[:, 2]
@@ -63,7 +65,8 @@ def flip_detect(net,img):
 
 def scale_detect(net,img,scale=2.0,facesize=None):
     img = cv2.resize(img,(0,0),fx=scale,fy=scale)
-    b = detect(net,img)
+    with torch.no_grad():
+        b = detect(net,img)
 
     bboxlist = np.zeros(b.shape)
     bboxlist[:, 0] = b[:, 0]/scale
@@ -95,7 +98,7 @@ def detect_and_supress(img, score_threshold):
         bboxes = bboxes[keep]
         bboxes = bboxes[bboxes[:, 4] >= 0.5] # Remove small faces
         
-        bboxes /= resize_ratio
+        bboxes[:, :4] /= resize_ratio
         scores = bboxes[:, 4]
         bboxes = bboxes[scores > score_threshold, :]
         scores = bboxes[:, 4]

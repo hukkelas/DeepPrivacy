@@ -32,7 +32,7 @@ class Logger:
 
     def log_variable(self, tag, value, log_to_validation=False, log_level=SPAM):
         if log_level >= PRINT_LOG_LEVEL:
-            print("{:7s}: {:20s} = {}".format(log_level, tag, value))
+            print("{}: {:20s} = {}".format(log_level, tag, value))
         if log_to_validation:
             self.validation_writer.add_scalar(tag, value,
                                               global_step=self.global_step)

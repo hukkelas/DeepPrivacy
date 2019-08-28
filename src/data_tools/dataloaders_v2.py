@@ -1,26 +1,30 @@
 import torch
 import os
-import src.utils
+import src.models.utils as model_utils
+import tqdm
 import glob
 import numpy as np
 from torchvision import transforms
 from src.data_tools.data_samplers import ValidationSampler, TrainSampler
 from src.data_tools.data_utils import DataPrefetcher
+
 MAX_VALIDATION_SIZE = 50000
+
 
 def load_dataset(dataset, batch_size, imsize, full_validation, pose_size, load_fraction=False):
     if dataset == "celeba":
-        raise NotImplementedError
+        dirpath = os.path.join("data", "celeba_numpy")
+        return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
     if dataset == "ffhq":
         raise NotImplementedError
     if dataset == "yfcc100m":
         dirpath = os.path.join("data", "yfcc100m_torch")
         return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
     if dataset == "yfcc100m128":
-        dirpath = os.path.join("data", "yfcc100m128_torch")
+        dirpath = os.path.join("data", "yfcc100m_torch_fix_transition")
         return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
-    if dataset == "yfcc100m128v2":
-        dirpath = os.path.join("data", "yfcc100m128_torch_v2")
+    if dataset == "fdf":
+        dirpath = os.path.join("data", "fdf")
         return _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, pose_size)
     raise AssertionError("Dataset was incorrect", dataset)
 
@@ -47,8 +51,7 @@ class DeepPrivacyDataset(torch.utils.data.Dataset):
         landmarks = self.landmarks[index].clone()
         bbox = self.bounding_boxes[index].clone()
         if self.augment_data:
-            bbox = bounding_box_data_augmentation(bbox, self.imsize, 0.02)
-            
+            bbox = bounding_box_data_augmentation(bbox, self.imsize, 2/100)
             if np.random.rand() > 0.5:
                 im = transforms.functional.hflip(im)
                 x = landmarks[range(0, landmarks.shape[0], 2)]
@@ -56,8 +59,7 @@ class DeepPrivacyDataset(torch.utils.data.Dataset):
                 bbox[[0, 2]] = self.imsize - bbox[[2, 0]]
         im = np.asarray(im)
         condition = im.copy()
-        condition = cut_bounding_box(condition, bbox)
-
+        condition = cut_bounding_box(condition, bbox, self.transition_variable)
         return im, condition, landmarks
 
     def __len__(self):
@@ -152,8 +154,8 @@ def _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, p
                                                  drop_last=True,
                                                  pin_memory=True,
                                                  collate_fn=fast_collate)
-    dataloader_train = DataPrefetcher(dataloader_train, pose_size)
-    dataloader_val = DataPrefetcher(dataloader_val, pose_size)
+    dataloader_train = DataPrefetcher(dataloader_train, pose_size, dataset_train)
+    dataloader_val = DataPrefetcher(dataloader_val, pose_size, dataset_val)
     return dataloader_train, dataloader_val
 
 
@@ -180,18 +182,16 @@ def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):
     return bounding_boxes
 
 
-def cut_bounding_box(condition, bounding_boxes):
-    x0 = bounding_boxes[0]
-    y0 = bounding_boxes[1]
-    x1 = bounding_boxes[2]
-    y1 = bounding_boxes[3]
-    previous_image = condition[y0:y1, x0:x1]
-    #print(previous_image.max(), previous_image.min())
-    if previous_image.size == 0:
+def cut_bounding_box(condition, bounding_boxes, transition_variable):
+    assert 1 <= condition.max()  <= 255
+    bounding_boxes = bounding_boxes.clone()
+    if transition_variable != 1:
+        bounding_boxes_0 = bounding_boxes // 2 * 2
+        bounding_boxes = model_utils.get_transition_value(bounding_boxes_0.float(), bounding_boxes.float(), transition_variable).long()
+
+    x0, y0, x1, y1 = [k.item() for k in bounding_boxes]
+    if  x0 >= x1 or y0 >= y1:
         return condition
-    mean = previous_image.mean()
-    std = previous_image.std()
-    replacement = np.random.normal(mean, std,
-                                   size=previous_image.shape)
-    previous_image[:, :, :] = replacement.astype(condition.dtype)
+
+    condition[y0:y1, x0:x1, :] = 128
     return condition

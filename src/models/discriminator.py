@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from src.models.custom_layers import WSConv2d, WSLinear
+from src.models.custom_layers import WSConv2d, WSLinear, MinibatchStdLayer
 from src.models.utils import generate_pose_channel_images, get_transition_value
 from src.models.base_model import ProgressiveBaseModel
 
@@ -47,6 +47,7 @@ class Discriminator(ProgressiveBaseModel):
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
             nn.Sequential(
+                #MinibatchStdLayer(),
                 conv_module_bn(start_channel_dim + self.num_poses, start_channel_dim, 3, 1),
                 conv_module_bn(start_channel_dim, start_channel_dim, 4, 0),
             )
@@ -100,7 +101,7 @@ class Discriminator(ProgressiveBaseModel):
         return x
 
 
-class DeepDiscriminator(nn.Module):
+class DeepDiscriminator(ProgressiveBaseModel):
 
     def __init__(self, 
                  image_channels,

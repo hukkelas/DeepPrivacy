@@ -12,6 +12,7 @@ for name in names:
         "models/{}/checkpoints".format(name),
         "models/{}/summaries".format(name),
         "models/{}/generated_data".format(name),
+        "models/{}/transition_checkpoints".format(name)
     ]
     for folder in to_remove:
         try:

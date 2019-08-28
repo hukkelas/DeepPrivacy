@@ -1,3 +1,4 @@
+.cache/
 data
 input_images/
 generated/
@@ -27,3 +28,12 @@ scripts/debug
 *.pth
 models/old
 anonymized_images/
+.debug/
+transition_checkpoints/
+fid_images/
+models_old
+inception/
+.fid_cache/
+tensorboard_summaries/
+
+*.pyc

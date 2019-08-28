@@ -116,8 +116,22 @@ class Generator(ProgressiveBaseModel):
         new_paramters += list(self.new_up.parameters()) + list(self.from_rgb_new.parameters())
         return new_paramters
 
-    def forward(self, x_in, pose_info):
-        z = torch.randn(x_in.shape[0], 32, 4, 4, device=x_in.device, dtype=x_in.dtype)
+    def generate_latent_variable(self, *args):
+        if len(args) == 1:
+            x_in = args[0]
+            return torch.randn(x_in.shape[0], 32, 4, 4,
+                               device=x_in.device,
+                               dtype=x_in.dtype)
+        elif len(args) == 3:
+            batch_size, device, dtype = args
+            return torch.randn(batch_size, 32, 4, 4,
+                               device=device,
+                               dtype=dtype)
+        raise ValueError(f"Expected either x_in or (batch_size, device, dtype. Got: {args}")
+
+    def forward(self, x_in, pose_info, z=None):
+        if z is None:
+            z = self.generate_latent_variable(x_in)
         unet_skips = []
         if self.transition_step != 0:
             old_down = self.from_rgb_old(x_in)

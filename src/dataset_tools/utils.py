@@ -116,6 +116,7 @@ def expand_bounding_box(x0, y0, x1, y1, percentage, imshape):
     #x0, y0, width, height = quadratic_bounding_box(x0, y0, width, height, imshape)
     return x0, y0, width, height
 
+
 def read_json(path):
     with open(path, "r") as fp:
         return json.load(fp)
@@ -128,3 +129,39 @@ def is_keypoint_within_bbox(x0, y0, x1, y1, keypoint):
     within_X = np.all(kp_X >= x0) and np.all(kp_X <= x1)
     within_Y = np.all(kp_Y >= y0) and np.all(kp_Y <= y1)
     return within_X and within_Y
+
+
+def expand_bbox_simple(bbox, percentage):
+    x0, y0, x1, y1 = bbox.astype(float)
+    width = x1 - x0
+    height = y1 - y0
+    x_c = int(x0) + width//2
+    y_c = int(y0) + height//2
+    avg_size = max(width, height)
+    new_width = avg_size * (1 + percentage)
+    x0 = x_c - new_width//2
+    y0 = y_c - new_width//2
+    x1 = x_c + new_width//2
+    y1 = y_c + new_width//2
+    return np.array([x0, y0, x1, y1]).astype(int)
+
+
+def pad_image(im, bbox):
+    x0, y0, x1, y1 = bbox
+    if x0 < 0:
+        pad_im = np.zeros((im.shape[0], abs(x0), im.shape[2]), dtype=np.uint8)
+        im = np.concatenate((pad_im, im), axis=1)
+        x1 += abs(x0)
+        x0 = 0
+    if y0 < 0:
+        pad_im = np.zeros((abs(y0), im.shape[1], im.shape[2]), dtype=np.uint8)
+        im = np.concatenate((pad_im, im), axis=0)
+        y1 += abs(y0)
+        y0 = 0
+    if x1 >= im.shape[1]:
+        pad_im = np.zeros((im.shape[0], x1 - im.shape[1] + 1, im.shape[2]), dtype=np.uint8)
+        im = np.concatenate((im, pad_im), axis=1)
+    if y1 >= im.shape[0]:
+        pad_im = np.zeros((y1 - im.shape[0] + 1, im.shape[1], im.shape[2]), dtype=np.uint8)
+        im = np.concatenate((im, pad_im), axis=0)
+    return im[y0:y1, x0:x1]
