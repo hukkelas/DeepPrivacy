@@ -3,6 +3,7 @@ import numpy as np
 import shutil
 from .infer import read_args
 from src.inference.deep_privacy_anonymizer import DeepPrivacyAnonymizer
+from src.inference.blur import PixelationAnonymizer, BlurAnonymizer, BlackOutAnonymizer
 
 
 def get_bounding_boxes(source_dir, dataset):
@@ -59,17 +60,46 @@ def get_bounding_boxes(source_dir, dataset):
     im_bboxes = [np.array(im_bboxes_dict[k]) for k in relative_image_paths]
     return relative_image_paths, im_bboxes
 
-def anonymize_images_wider(anonymization_type, *args):
+
+def init_anonymizer(anonymization_type, keypoint_threshold, face_threshold, generator):
     if anonymization_type == "deep_privacy":
-        print("Anonymization type: DeepPrivacy")
-        return anonymize_images(*args)
-    elif anonymization_type == "pixelation16":
-        print("Anonymization type: Pixelation16")
-        return anonymize_images_pixelation(*args, 16)
+        return DeepPrivacyAnonymizer(
+            generator,
+            batch_size=128,
+            use_static_z=True,
+            keypoint_threshold=keypoint_threshold,
+            face_threshold=face_threshold
+        )
     elif anonymization_type == "pixelation8":
-        print("Anonymization type: Pixelation8")
-        return anonymize_images_pixelation(*args, 8)
-    raise AttributeError
+        return PixelationAnonymizer(
+            pixelation_size=8,
+            face_threshold=face_threshold,
+            keypoint_threshold=keypoint_threshold,
+        )
+    elif anonymization_type == "pixelation16":
+        return PixelationAnonymizer(
+            pixelation_size=16,
+            face_threshold=face_threshold,
+            keypoint_threshold=keypoint_threshold,
+        )
+    elif anonymization_type == "heavy_blur":
+        return BlurAnonymizer(
+            "heavy_blur",
+            face_threshold=face_threshold,
+            keypoint_threshold=keypoint_threshold)
+    elif anonymization_type == "gaussian_blur":
+        return BlurAnonymizer(
+            "gaussian_blur",
+            face_threshold=face_threshold,
+            keypoint_threshold=keypoint_threshold)
+    elif anonymization_type == "black_out":
+        return BlackOutAnonymizer(
+            "heavy_blur",
+            face_threshold=face_threshold,
+            keypoint_threshold=keypoint_threshold)
+    else:
+        raise AttributeError("Did not find anonymization type:",
+                             anonymization_type)
 
 
 if __name__ == "__main__":
@@ -80,16 +110,16 @@ if __name__ == "__main__":
     relative_image_paths, im_bboxes = get_bounding_boxes(source_path, "val")
 
     image_paths = [os.path.join(source_path, k) for k in relative_image_paths]
-    anonymizer = DeepPrivacyAnonymizer(
-        generator,
-        batch_size=128,
-        use_static_z=True,
-        keypoint_threshold=.01,
-        face_threshold=0.0
-    )
+    face_threshold = 0.0
+    keypoint_threshold = 0.01
+
+    anonymizer = init_anonymizer(config.anonymization_type,
+                                 keypoint_threshold,
+                                 face_threshold,
+                                 generator)
     save_paths = [os.path.join(save_path, relative_path)
                   for relative_path in relative_image_paths]
-    anonymizer.anonymize_image_paths(image_paths, save_paths, 
+    anonymizer.anonymize_image_paths(image_paths, save_paths,
                                      im_bboxes=im_bboxes)
     # Copy wider_face_val
     source_path = os.path.join(source_path, "wider_face_split")

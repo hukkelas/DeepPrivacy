@@ -35,3 +35,5 @@ models_old
 inception/
 .fid_cache/
 tensorboard_summaries/
+
+*.pyc

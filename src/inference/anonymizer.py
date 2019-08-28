@@ -35,9 +35,9 @@ class Anonymizer:
             face_threshold=self.face_threshold
         )
 
-        anonymized_images = self.anonymize_images(images, 
-                                                  im_keypoints,
-                                                  im_bboxes)
+        anonymized_images = self.anonymize_images(images,
+                                                  im_keypoints=im_keypoints,
+                                                  im_bboxes=im_bboxes)
 
         for image_idx, (new_path, anon_im) in enumerate(zip(save_paths,
                                                             anonymized_images)):
