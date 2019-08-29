@@ -6,37 +6,46 @@ import torch
 import math
 import argparse
 import numpy as np
+import utils
+import shutil
 from PIL import Image
-from src.dataset_tools.utils import (expand_bounding_box, read_json,
-                                     is_keypoint_within_bbox,
-                                     expand_bbox_simple, pad_image)
 
-TARGET_DIR = "data/test"
-IMAGE_TARGET_DIR = os.path.join(TARGET_DIR, "original")
-os.makedirs(IMAGE_TARGET_DIR, exist_ok=True)
+
+TARGET_DIR = "data/fdf_new"
+shutil.rmtree(TARGET_DIR)
+IMAGE_TARGET_DIR = os.path.join(TARGET_DIR, "images")
+os.makedirs(IMAGE_TARGET_DIR)
 BBOX_TARGET_DIR = os.path.join(TARGET_DIR, "bounding_box")
-os.makedirs(BBOX_TARGET_DIR, exist_ok=True)
+os.makedirs(BBOX_TARGET_DIR)
 LANDMARK_TARGET_DIR = os.path.join(TARGET_DIR, "landmarks")
-os.makedirs(LANDMARK_TARGET_DIR, exist_ok=True)
+os.makedirs(LANDMARK_TARGET_DIR)
 
 np.random.seed(0)
 IMAGE_SOURCE_DIR = "/work/haakohu/yfcc100m/images2"
-LANDMARKS_PATH = "/lhome/haakohu/flickr_download/annotations_keypoints.json"
-BBOX_PATH = "/lhome/haakohu/flickr_download/annotations.json"
-BBOX_JSON = read_json(BBOX_PATH)
-LANDMARKS_JSON = read_json(LANDMARKS_PATH)
-BBOX_EXPANSION_FACTOR = 0.35
+#LANDMARKS_PATH = "/lhome/haakohu/flickr_download/annotations_keypoints.json"
+LANDMARKS_PATH = "test_keypoints.json"
+
+#BBOX_PATH = "/lhome/haakohu/flickr_download/annotations.json"
+BBOX_PATH = "test_bbox.json"
+BBOX_JSON = utils.read_json(BBOX_PATH)
+LANDMARKS_JSON = utils.read_json(LANDMARKS_PATH)
+fdf_metainfo = utils.read_json("fdf_metainfo.json")
+
 MIN_BBOX_SIZE = 128
 parser = argparse.ArgumentParser()
 parser.add_argument("--max_imsize", default=128, type=int)
 parser.add_argument("--min_imsize", default=4, type=int)
-parser.add_argument("--simple_expand", default=True, action="store_false",
+parser.add_argument("--simple_expand", default=False, action="store_true",
                     help="Expands the face bounding box from the center. Can include black borders.")
 args = parser.parse_args()
-if args.simple_expand:
-    BBOX_EXPANSION_FACTOR = .4
+
+
 num_sizes = int(math.log(args.max_imsize/args.min_imsize, 2))
 TARGET_IMSIZES = [args.min_imsize * (2**k) for k in range(1, num_sizes+1)]
+
+for imsize in TARGET_IMSIZES:
+    folder = os.path.join(IMAGE_TARGET_DIR, str(imsize))
+    os.makedirs(folder)
 
 
 def get_imnames():
@@ -44,6 +53,7 @@ def get_imnames():
     imnames2 = set(BBOX_JSON.keys())
     image_names = list(imnames2.intersection(imnames1))
     image_names.sort()
+
     return image_names
 
 
@@ -68,7 +78,7 @@ def match_bbox_keypoint(bounding_boxes, keypoints):
         for kp_idx, keypoint in enumerate(keypoints):
             if kp_idx in [x[1] for x in matches]:
                 continue
-            if is_keypoint_within_bbox(*bbox, keypoint):
+            if utils.is_keypoint_within_bbox(*bbox, keypoint):
                 matches.append((bbox_idx, kp_idx))
                 break
     keypoint_idx = [x[1] for x in matches]
@@ -76,33 +86,33 @@ def match_bbox_keypoint(bounding_boxes, keypoints):
     return bounding_boxes[bbox_idx], keypoints[keypoint_idx]
 
 
-def process_face(bbox, landmark, imshape):
+def process_face(bbox, landmark, imshape, imname):
     assert bbox.shape == (4,), "Was shape: {}".format(bbox.shape)
     assert landmark.shape == (2, 7), "Was shape: {}".format(landmark.shape)
-    if args.simple_expand:
-        x0, y0, x1, y1 = expand_bbox_simple(bbox, BBOX_EXPANSION_FACTOR)
-    else:
-        try:
-            x0, y0, w, h = expand_bounding_box(*bbox, BBOX_EXPANSION_FACTOR, imshape)
-            x1 = x0 + w
-            y1 = y0 + h
-            x0, y0, x1, y1 = [int(_) for _ in [x0, y0, x1, y1]]
-        except AssertionError:
-            return None
-    width = x1 - x0
+    orig_bbox = bbox.copy()
+    orig_landmark = landmark.copy()
+    expanded_bbox = utils.expand_bbox(bbox, imshape, args.simple_expand)
+    if expanded_bbox is None:
+        return None
+
+    width = expanded_bbox[2] - expanded_bbox[0]
+    height = expanded_bbox[3] - expanded_bbox[1]
     if width < MIN_BBOX_SIZE:
         return None
-    bbox[[0, 2]] -= x0
-    bbox[[1, 3]] -= y0
-    assert width == y1 - y0, f"width: {width}, height: {y1-y0}"
+    bbox[[0, 2]] -= expanded_bbox[0]
+    bbox[[1, 3]] -= expanded_bbox[1]
+    assert width == height, f"width: {width}, height: {y1-y0}"
     bbox = bbox.astype("int")
-    landmark[0] -= x0
-    landmark[1] -= y0
+    landmark[0] -= expanded_bbox[0]
+    landmark[1] -= expanded_bbox[1]
     landmark = np.array([landmark[j, i] for i in range(landmark.shape[1]) for j in range(2)])
     return {
-        "expanded_bbox": np.array([x0, y0, x1, y1]),
+        "expanded_bbox": expanded_bbox,
         "face_bbox": bbox,
-        "landmark": landmark.flatten()
+        "landmark": landmark.flatten(),
+        "orig_bbox": orig_bbox,
+        "orig_landmark": orig_landmark,
+        "line_idx": imname.split(".")[0]
     }
 
 
@@ -125,7 +135,7 @@ def process_image(imname):
         bbox[1] = max(0, bbox[1])
         bbox[2] = min(imshape[1], bbox[2])
         bbox[3] = min(imshape[0], bbox[3])
-        face_res = process_face(bbox.copy(), landmark, imshape)
+        face_res = process_face(bbox.copy(), landmark, imshape, imname)
         if face_res is not None:
             resulting_annotation.append(face_res)
     return resulting_annotation, impath
@@ -138,37 +148,26 @@ def pool(img):
     return img
 
 
-def extract_and_save_image_batch(impaths, image_annotations, batch_idx):
-    images = []
-    for impath in impaths:
-        images.append(np.array(Image.open(impath).convert("RGB")))
-    extracted_faces = []
-    for image, annotations in zip(images, image_annotations):
-        for annotation in annotations:
-            x0, y0, x1, y1 = annotation["expanded_bbox"]
-            if args.simple_expand:
-                cut_im = pad_image(image, [x0, y0, x1, y1])
-            else:
-                cut_im = image[y0:y1, x0:x1]
-            extracted_faces.append(cut_im)
+def save_face(original_im, face_annotation, im_idx):
+    im = utils.cut_face(original_im, face_annotation["expanded_bbox"],
+                        args.simple_expand)
     max_imsize = TARGET_IMSIZES[-1]
-    extracted_faces = [
-        cv2.resize(im, (max_imsize, max_imsize), interpolation=cv2.INTER_AREA)
-        for im in extracted_faces
-    ]
-    to_save = [np.zeros((len(extracted_faces), imsize, imsize, 3), dtype=np.uint8)
-               for imsize in TARGET_IMSIZES]
-    for im_idx, im in enumerate(extracted_faces):
-        for imsize_idx in range(len(TARGET_IMSIZES)-1, -1, -1):
-            assert im.shape == (TARGET_IMSIZES[imsize_idx], TARGET_IMSIZES[imsize_idx], 3), f'Imsize was: {im.shape}'
-            to_save[imsize_idx][im_idx] = im
-            im = pool(im)
-    for faces, imsize in zip(to_save, TARGET_IMSIZES):
-        assert faces.shape[1:] == (imsize, imsize, 3), f'Shape was: {faces.shape}'
-        target_dir = os.path.join(IMAGE_TARGET_DIR, str(imsize))
-        os.makedirs(target_dir, exist_ok=True)
-        target_path = os.path.join(target_dir, f"{batch_idx}.npy")
-        np.save(target_path, faces)
+    im = cv2.resize(im, (max_imsize, max_imsize), interpolation=cv2.INTER_AREA)
+
+    for imsize_idx in range(len(TARGET_IMSIZES)-1, -1, -1):
+        imsize = TARGET_IMSIZES[imsize_idx]
+        assert im.shape == (imsize, imsize, 3)
+        assert im.dtype == np.uint8
+        impath = os.path.join(IMAGE_TARGET_DIR, str(imsize), f'{im_idx}.jpg')
+        to_save = Image.fromarray(im)
+        to_save.save(impath)
+        im = pool(im)
+
+
+def extract_and_save_faces(impath, image_annotations, batch_offset):
+    original_im = np.array(Image.open(impath).convert("RGB"))
+    for face_idx, face_annotation in enumerate(image_annotations):
+        save_face(original_im, face_annotation, face_idx + batch_offset)
 
 
 def save_annotation(bounding_boxes, landmarks, sizes):
@@ -195,6 +194,7 @@ def extract_annotations_and_save(image_annotations):
     bounding_boxes = []
     landmarks = []
     sizes = []
+    save_metainfo(image_annotations)
     for annotations in tqdm.tqdm(image_annotations, desc="Saving annotations"):
         for annotation in annotations:
             bounding_boxes.append(annotation["face_bbox"])
@@ -208,11 +208,54 @@ def extract_annotations_and_save(image_annotations):
     save_annotation(bounding_boxes, landmarks, sizes)
 
 
+def save_metainfo(image_annotations):
+    line_idx_to_yfccm_id = {
+        item["yfcc100m_line_idx"]: key
+        for key, item in fdf_metainfo.items()
+    }
+    to_save = {
+
+    }
+    face_id = 0
+    total_faces = sum([len(x) for x in image_annotations])
+    validation_size = 50000
+    start_validation = total_faces - validation_size
+
+    for image_annotation in image_annotations:
+        for face_annotation in image_annotation:
+            line_idx = face_annotation["line_idx"]
+            yfcc100m_id = line_idx_to_yfccm_id[line_idx]
+            face_metainfo = {
+                key: item
+                for key, item in fdf_metainfo[yfcc100m_id].items()
+            }
+            new_landmark = face_annotation["landmark"].reshape(2, -1)
+            orig_landmark = face_annotation["orig_landmark"]
+            assert new_landmark.shape == orig_landmark.shape, f"new_landmark: {new_landmark.shape}, orig_landmark: {orig_landmark.shape}"
+            orig_landmark = np.rollaxis(orig_landmark, 1)
+            print(orig_landmark.shape)
+            face_metainfo["original_bounding_box"] = face_annotation["orig_bbox"].astype(int).tolist()
+            face_metainfo["original_landmark"] = orig_landmark.tolist()
+            face_metainfo["bounding_box"] = face_annotation["face_bbox"].tolist()
+            face_metainfo["landmark"] = face_annotation["landmark"].tolist()
+            face_metainfo["yfcc100m_line_idx"] = line_idx
+
+            if face_id >= start_validation:
+                face_metainfo["category"] = "validation"
+            else:
+                face_metainfo["category"] = "training"
+            to_save[face_id] = face_metainfo
+            face_id += 1
+
+    save_path = os.path.join(TARGET_DIR, "fdf_metainfo.json")
+    utils.write_json(to_save, save_path)
+
+
 def main():
     image_names = get_imnames()
     impaths = []
     image_annotations = []
-    with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+    with multiprocessing.Pool(1) as pool:
         jobs = []
         for imname in image_names:
             job = pool.apply_async(process_image, (imname, ))
@@ -224,14 +267,15 @@ def main():
     extract_annotations_and_save(image_annotations)
     total_images = [len(x) for x in image_annotations]
     print("Total number of images:", sum(total_images))
-    num_jobs = 20000
-    batch_size = math.ceil(len(impaths) / num_jobs)
+    batch_offset = 0
     with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
         jobs = []
-        for i in range(num_jobs):
-            impath = impaths[i*batch_size:(i+1)*batch_size]
-            annotations = image_annotations[i*batch_size:(i+1)*batch_size]
-            job = pool.apply_async(extract_and_save_image_batch, (impath, annotations, i))
+        for im_idx, annotations in enumerate(image_annotations):
+            impath = impaths[im_idx]
+            job = pool.apply_async(
+                extract_and_save_faces, (impath, annotations, batch_offset)
+            )
+            batch_offset += len(annotations)
             jobs.append(job)
         for job in tqdm.tqdm(jobs):
             job.get()

@@ -105,20 +105,8 @@ SIMPLE_EXPAND = False
 
 def pre_process(im, keypoint, bbox, imsize, cuda=True):
     bbox = to_numpy(bbox)
-    if SIMPLE_EXPAND:
-        expanded_bbox = dataset_utils.expand_bbox_simple(bbox, 0.4)
-        to_replace = dataset_utils.pad_image(im, expanded_bbox)
-    else:
-        try:
-            x0, y0, w, h = dataset_utils.expand_bounding_box(*bbox, 0.35,
-                                                              im.shape)
-            expanded_bbox = np.array([x0, y0, x0+w, y0+h])
-
-            to_replace = im[y0:y0+h, x0:x0+w]
-        except AssertionError as e:
-            print("Could not process image, bbox error", e)
-            expanded_bbox = dataset_utils.expand_bbox_simple(bbox, 0.7)
-            to_replace = dataset_utils.pad_image(im, expanded_bbox)
+    expanded_bbox = dataset_utils.expand_bbox(bbox, 0.4, SIMPLE_EXPAND)
+    to_replace = dataset_utils.cut_face(im, expanded_bbox, SIMPLE_EXPAND)
     new_bbox = shift_bbox(bbox, expanded_bbox, imsize)
     new_keypoint = shift_and_scale_keypoint(keypoint, expanded_bbox)
     to_replace = cv2.resize(to_replace, (imsize, imsize))

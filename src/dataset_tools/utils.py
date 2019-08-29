@@ -55,15 +55,12 @@ def quadratic_bounding_box(x0, y0, width, height, imshape):
     return x0, y0, width, height
 
 
-def expand_bounding_box(x0, y0, x1, y1, percentage, imshape):
-    x0_o = x0
-    y0_o = y0
-    x1_o = x1
-    y1_o = y1
+def expand_bounding_box(bbox, percentage, imshape):
+    orig_bbox = bbox.copy()
+    x0, y0, x1, y1 = bbox
     width = x1 - x0
     height = y1 - y0
     x0, y0, width, height = quadratic_bounding_box(x0, y0, width, height, imshape)
-    
     expanding_factor = int(max(height, width) * percentage)
 
     possible_max_expansion = [(imshape[0] - width)//2,
@@ -108,18 +105,27 @@ def expand_bounding_box(x0, y0, x1, y1, percentage, imshape):
     assert x0 >= 0, "Y0 is minus"
     assert width <= imshape[1], "Height is larger than image."
     # Check that original bbox is within new
-
+    x0_o, y0_o, x1_o, y1_o = orig_bbox
     assert x0 <= x0_o, "New bbox is outisde of original. O:{}, N: {}".format(x0_o, x0 )
     assert x1 >= x1_o, "New bbox is outisde of original. O:{}, N: {}".format(x1_o, x1)
     assert y0 <= y0_o, "New bbox is outisde of original. O:{}, N: {}".format(y0_o, y0)
     assert y1 >= y1_o, "New bbox is outisde of original. O:{}, N: {}".format(y1_o, y1)
     #x0, y0, width, height = quadratic_bounding_box(x0, y0, width, height, imshape)
-    return x0, y0, width, height
+    x0, y0, width, height = [int(_) for _ in [x0, y0, width, height]]
+    x1 = x0 + width
+    y1 = y0 + height
+    return x0, y0, x1, y1
 
 
 def read_json(path):
+    print("reading:", path)
     with open(path, "r") as fp:
         return json.load(fp)
+
+
+def write_json(obj, path):
+    with open(path, "w") as fp:
+        json.dump(obj, fp)
 
 
 def is_keypoint_within_bbox(x0, y0, x1, y1, keypoint):
@@ -165,3 +171,22 @@ def pad_image(im, bbox):
         pad_im = np.zeros((y1 - im.shape[0] + 1, im.shape[1], im.shape[2]), dtype=np.uint8)
         im = np.concatenate((im, pad_im), axis=0)
     return im[y0:y1, x0:x1]
+
+
+def cut_face(im, bbox, simple_expand):
+    if simple_expand:
+        return pad_image(im, bbox)
+    x0, y0, x1, y1 = bbox
+    return im[y0:y1, x0:x1]
+
+
+
+def expand_bbox(bbox, imshape, simple_expand, default_to_simple=False):
+    assert bbox.shape == (4,), f"BBox shape was: {bbox.shape}"
+    bbox = bbox.astype(float)
+    if simple_expand:
+        return expand_bbox_simple(bbox, 0.4)
+    try:
+        return expand_bounding_box(bbox, 0.35, imshape)
+    except AssertionError:
+        return expand_bbox_simple(bbox, 0.4)
