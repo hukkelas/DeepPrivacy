@@ -6,6 +6,7 @@ import numpy as np
 from src.visualization import utils as vis_utils
 from src.inference import infer
 from src.detection import detection_api
+from src.inference import utils as inference_utils
 
 
 class Anonymizer:
@@ -54,11 +55,12 @@ class Anonymizer:
             debug_impath = new_path.split(".")[0] + "_detected_left_anonymized_right.jpg"
             cv2.imwrite(debug_impath, to_save[:, :, ::-1])
 
-
     def anonymize_video(self, video_path, target_path,
                         start_frame=None,
                         end_frame=None,
-                        with_keypoints=False):
+                        with_keypoints=False,
+                        anonymize_source=False,
+                        max_face_size=1.0):
         # Read original video
         original_video = mp.VideoFileClip(video_path)
         fps = original_video.fps
@@ -77,6 +79,12 @@ class Anonymizer:
                                 total=end_frame - start_frame))
         if with_keypoints:
             im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(frames)
+            im_bboxes, im_keypoints = inference_utils.filter_image_bboxes(
+                im_bboxes, im_keypoints, 
+                [im.shape for im in frames],
+                max_face_size,
+                filter_type="width"
+            )
             anonymized_frames = self.anonymize_images(frames, im_keypoints, im_bboxes)
         else:
             im_bboxes = detection_api.batch_detect_faces(frames, self.face_threshold)
@@ -89,7 +97,8 @@ class Anonymizer:
             orig_frame = frames[frame_idx]
             orig_frame = vis_utils.draw_faces_with_keypoints(
                 orig_frame, im_bboxes[frame_idx], im_keypoints[frame_idx],
-                radius=10)
+                radius=None,
+                black_out_face=anonymize_source)
             return np.concatenate((orig_frame, anonymized_frame), axis=1)
         
         anonymized_video = mp.VideoClip(make_frame)

@@ -2,12 +2,7 @@ import tqdm
 import cv2
 import numpy as np
 from src.inference.anonymizer import Anonymizer
-
-
-def is_height_larger(bbox, image_shape, max_face_size):
-    x0, y0, x1, y1 = bbox
-    face_size = (y1 - y0) / image_shape[0]
-    return face_size >= max_face_size
+from src.inference import utils as inference_utils
 
 
 class SimpleAnonymizer(Anonymizer):
@@ -23,13 +18,13 @@ class SimpleAnonymizer(Anonymizer):
         for im_idx, im in enumerate(tqdm.tqdm(images, desc="Anonymizing images")):
             anonymized_image = im.copy()
             bboxes = im_bboxes[im_idx]
-
+            bboxes = inference_utils.filter_bboxes(bboxes,
+                                                   anonymized_image.shape,
+                                                   max_face_size)
             for bbox in bboxes:
                 x0, y0, x1, y1 = [int(_) for _ in bbox]
                 x0, y0 = max(0, x0), max(0, y0)
                 x1, y1 = min(im.shape[1], x1), min(im.shape[0], y1)
-                if is_height_larger(bbox, anonymized_image.shape, max_face_size):
-                    continue
                 if y1 - y0 <= 0 or x1 - x0 <= 0: continue
                 face = im[y0:y1, x0:x1]
                 if face.shape[0] == 0 or face.shape[1] == 0: continue

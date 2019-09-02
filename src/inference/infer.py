@@ -17,7 +17,7 @@ def init_generator(config, ckpt):
         config.models.start_channel_size,
         config.models.image_channels
     )
-    g.load_state_dict(ckpt["G"])
+    g.load_state_dict(ckpt["running_average_generator"])
     g.eval()
     torch_utils.to_cuda(g)
     return g
@@ -41,7 +41,7 @@ def get_images_recursive(image_folder):
 def to_numpy(el):
     if isinstance(el, torch.Tensor):
         return el.numpy()
-    if isinstance(el, list):
+    if isinstance(el, list) or isinstance(el, tuple):
         return np.array(el)
     return el
 
@@ -105,12 +105,14 @@ SIMPLE_EXPAND = False
 
 def pre_process(im, keypoint, bbox, imsize, cuda=True):
     bbox = to_numpy(bbox)
-    expanded_bbox = dataset_utils.expand_bbox(bbox, 0.4, SIMPLE_EXPAND)
+    expanded_bbox = dataset_utils.expand_bbox(bbox, im.shape, SIMPLE_EXPAND, 
+                                              default_to_simple=True)
     to_replace = dataset_utils.cut_face(im, expanded_bbox, SIMPLE_EXPAND)
     new_bbox = shift_bbox(bbox, expanded_bbox, imsize)
     new_keypoint = shift_and_scale_keypoint(keypoint, expanded_bbox)
     to_replace = cv2.resize(to_replace, (imsize, imsize))
-    to_replace = cut_bounding_box(to_replace.copy(), torch.tensor(new_bbox), 1.0)
+    to_replace = cut_bounding_box(to_replace.copy(), torch.tensor(new_bbox),
+                                  1.0)
     to_replace = torch_utils.image_to_torch(to_replace, cuda=cuda)
     keypoint = keypoint_to_torch(new_keypoint)
     torch_input = to_replace * 2 - 1
@@ -164,19 +166,30 @@ def post_process(im, generated_face, expanded_bbox, original_bbox, image_mask):
     return im
 
 
+def get_default_target_path(source_path, target_path, config_path):
+    if target_path != "":
+        return target_path
+    if source_path.endswith(".mp4"):
+        basename = source_path.split(".")
+        assert len(basename) == 2
+        return f"{basename[0]}_anonymized.mp4"
+    default_path = os.path.join(
+            os.path.dirname(config_path),
+            "anonymized_images"
+        )
+    print("Setting target path to default:", default_path)
+    return default_path
+
+
 def read_args(additional_args=[]):
     config = config_parser.initialize_and_validate_config([
         {"name": "source_path", "default": "test_examples/source"},
         {"name": "target_path", "default": ""}
     ] + additional_args)
-    save_path = config.target_path
-    if save_path == "":
-        default_path = os.path.join(
-            os.path.dirname(config.config_path),
-            "anonymized_images"
-        )
-        print("Setting target path to default:", default_path)
-        save_path = default_path
+    target_path = config.target_path
+    target_path = get_default_target_path(config.source_path,
+                                          config.target_path,
+                                          config.config_path)
     ckpt = utils.load_checkpoint(config.checkpoint_dir)
     generator = init_generator(config, ckpt)
 
@@ -184,5 +197,5 @@ def read_args(additional_args=[]):
     source_path = config.source_path
     image_paths = get_images_recursive(source_path)
     if additional_args:
-        return generator, imsize, source_path, image_paths, save_path, config
-    return generator, imsize, source_path, image_paths, save_path
+        return generator, imsize, source_path, image_paths, target_path, config
+    return generator, imsize, source_path, image_paths, target_path

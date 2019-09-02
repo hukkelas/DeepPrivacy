@@ -10,6 +10,10 @@ face_detector = DSFDDetector("src/detection/dsfd/weights/WIDERFace_DSFD_RES152.p
 def clip_detections(detections, imshape):
     detections[:, [0, 2]] = np.clip(detections[:, [0, 2]], 0, imshape[1])
     detections[:, [1, 3]] = np.clip(detections[:, [1, 3]], 0, imshape[0])
+    height = detections[:, 3] - detections[:, 1]
+    width = detections[:, 2] - detections[:, 0]
+    detections = detections[width > 0]
+    detections = detections[height > 0]
     return detections
 
 

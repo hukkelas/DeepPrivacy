@@ -17,8 +17,10 @@ def draw_faces_with_keypoints(
         im,
         im_bboxes,
         im_keypoints,
-        radius=None
+        radius=None,
+        black_out_face=False
         ):
+    im = im.copy()
     if im_keypoints is None:
         assert im_bboxes is not None, "Image bboxes cannot be None."
         im_keypoints = [None for i in range(len(im_bboxes))]
@@ -30,7 +32,10 @@ def draw_faces_with_keypoints(
         color = colors[c_idx % len(colors)]
         if bbox is not None:
             x0, y0, x1, y1 = bbox
-            im = cv2.rectangle(im, (x0, y0), (x1, y1), color)
+            if black_out_face:
+                im[y0:y1, x0:x1, :] = 128
+            else:
+                im = cv2.rectangle(im, (x0, y0), (x1, y1), color)
         if keypoint is None:
             continue
         for x, y in keypoint:

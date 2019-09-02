@@ -114,7 +114,7 @@ def expand_bounding_box(bbox, percentage, imshape):
     x0, y0, width, height = [int(_) for _ in [x0, y0, width, height]]
     x1 = x0 + width
     y1 = y0 + height
-    return x0, y0, x1, y1
+    return np.array([x0, y0, x1, y1])
 
 
 def read_json(path):
@@ -174,7 +174,7 @@ def pad_image(im, bbox):
 
 
 def cut_face(im, bbox, simple_expand):
-    if simple_expand:
+    if simple_expand or (bbox < 0).any() or (bbox[2] > im.shape[1]) or (bbox[3] > im.shape[0]):
         return pad_image(im, bbox)
     x0, y0, x1, y1 = bbox
     return im[y0:y1, x0:x1]
@@ -189,4 +189,4 @@ def expand_bbox(bbox, imshape, simple_expand, default_to_simple=False):
     try:
         return expand_bounding_box(bbox, 0.35, imshape)
     except AssertionError:
-        return expand_bbox_simple(bbox, 0.4)
+        return expand_bbox_simple(bbox, 0.7)
