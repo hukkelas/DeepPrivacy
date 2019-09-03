@@ -43,7 +43,7 @@ def load_checkpoint(ckpt_dir_or_file, load_best=False, map_location=None):
             with open(os.path.join(ckpt_dir_or_file, 'latest_checkpoint')) as f:
                 if False:
                     ckpt_paths = f.readlines()
-                    ckpt_path = [_.strip() for _ in ckpt_paths if "20000000" in _][0]
+                    ckpt_path = [_.strip() for _ in ckpt_paths if "30000000" in _][0]
                     ckpt_path = os.path.join(ckpt_dir_or_file, ckpt_path)
                 else:
                     ckpt_path = os.path.join(ckpt_dir_or_file, f.readline()[:-1])

@@ -4,13 +4,14 @@ import os
 import matplotlib.pyplot as plt
 from deep_privacy import torch_utils
 from deep_privacy.inference import infer, deep_privacy_anonymizer
-from deep_privacy.data_tools.dataloaders_v2 import load_dataset_files, cut_bounding_box
+from deep_privacy.data_tools.dataloaders import load_dataset_files, cut_bounding_box
+from deep_privacy.visualization import utils as vis_utils
 
 
 if __name__ == "__main__":
     generator, _, _, _, _ = infer.read_args()
     imsize = generator.current_imsize
-    images, bounding_boxes, landmarks = load_dataset_files("data/celeba_numpy", imsize,
+    images, bounding_boxes, landmarks = load_dataset_files("data/fdf_png", imsize,
                                                            load_fraction=True)
     batch_size = 128
     anonymizer = deep_privacy_anonymizer.DeepPrivacyAnonymizer(generator,
@@ -24,14 +25,16 @@ if __name__ == "__main__":
     z = generator.generate_latent_variable(1, "cuda", torch.float32).zero_()
     for idx in range(-20, -1):
         orig = images[idx]
+        orig = np.array(orig)
         pose = landmarks[idx:idx+1]
 
         assert orig.dtype == np.uint8
 
         to_save = orig.copy()
+        to_save = vis_utils.draw_faces_with_keypoints(
+            to_save, None, [infer.keypoint_to_numpy(pose*128)]
+        )
         to_save = np.tile(to_save, (3, 1, 1))
-
-        truncation_levels = np.linspace(0.00, 3, num_iterations)
 
         for i in range(num_iterations):
             im = orig.copy()

@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import os
 from deep_privacy import torch_utils
 from deep_privacy.inference import infer
-from deep_privacy.data_tools.dataloaders_v2 import load_dataset_files, cut_bounding_box
+from deep_privacy.data_tools.dataloaders import load_dataset_files, cut_bounding_box
 
 
 def truncated_z(z, x_in, generator, truncation_level):

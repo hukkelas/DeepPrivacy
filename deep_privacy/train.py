@@ -9,7 +9,7 @@ import tqdm
 from apex import amp
 from deep_privacy import config_parser, logger, utils
 from deep_privacy.data_tools.data_utils import denormalize_img
-from deep_privacy.data_tools.dataloaders_v2 import load_dataset
+from deep_privacy.data_tools.dataloaders import load_dataset
 from deep_privacy.metrics import fid
 from deep_privacy.models import loss
 from deep_privacy.models.generator import Generator
@@ -18,9 +18,9 @@ from deep_privacy.torch_utils import to_cuda
 from deep_privacy.utils import (amp_state_has_overflow, load_checkpoint,
                        save_checkpoint, wrap_models)
 
+torch.manual_seed(0)
+np.random.seed(0)
 if False:
-    torch.manual_seed(0)
-    np.random.seed(0)
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = True
     torch.set_printoptions(precision=10)

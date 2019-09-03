@@ -1,9 +1,10 @@
 import torch
-from .dataloaders_v2 import load_dataset
+from .dataloaders import load_dataset
 from ..visualization import utils as vis_utils
 from .. import torch_utils
 import matplotlib.pyplot as plt
 from . import data_utils
+from deep_privacy.inference import infer
 
 def keypoint1d_to_2d(keypoints):
   assert len(keypoints.shape) == 1
@@ -12,7 +13,7 @@ def keypoint1d_to_2d(keypoints):
   kp = torch.stack((x,y), dim=1)
   return kp
 
-dl_train, dl_val = load_dataset("yfcc100m128", 
+dl_train, dl_val = load_dataset("fdf", 
                                 batch_size=128,
                                 imsize=128,
                                 full_validation=False,
@@ -33,12 +34,10 @@ for ims, condition, landmarks in dl:
     im = ims[i]
     c = condition[i]
     l = landmarks[i]
-    l = [keypoint1d_to_2d(l).cpu().numpy()]
-    im = data_utils.denormalize_img(im)
-    im = torch_utils.image_to_numpy(im, to_uint8=True)
+    l = [infer.keypoint_to_numpy(l.cpu())]
+    im = torch_utils.image_to_numpy(im, to_uint8=True, denormalize=True)
     im = vis_utils.draw_faces_with_keypoints(im, None,l)
-    c = data_utils.denormalize_img(c)
-    c = torch_utils.image_to_numpy(c, to_uint8=True)
+    c = torch_utils.image_to_numpy(c, to_uint8=True, denormalize=True)
     to_save_ims.append(im)
     to_save_condition.append(c)
     if len(to_save_ims) == num_ims: break

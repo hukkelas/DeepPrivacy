@@ -6,7 +6,7 @@ import multiprocessing
 import numpy as np
 import torch
 from deep_privacy import torch_utils, config_parser
-from deep_privacy.data_tools.dataloaders_v2 import load_dataset
+from deep_privacy.data_tools.dataloaders import load_dataset
 from deep_privacy.data_tools.data_utils import denormalize_img
 from deep_privacy.utils import load_checkpoint
 from deep_privacy.inference.infer import init_generator 
@@ -38,7 +38,7 @@ def read_args():
 generator, imsize, save_path, pose_size = read_args()
 
 batch_size = 128
-dataloader_train, dataloader_val = load_dataset("yfcc100m128", batch_size, 128, True, pose_size, True )
+dataloader_train, dataloader_val = load_dataset("fdf", batch_size, 128, True, pose_size, True )
 dataloader_val.update_next_transition_variable(1.0)
 fake_images = np.zeros((len(dataloader_val)*batch_size, imsize, imsize, 3),
                        dtype=np.uint8)

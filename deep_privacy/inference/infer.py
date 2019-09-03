@@ -5,7 +5,7 @@ import numpy as np
 from deep_privacy import config_parser, utils
 from deep_privacy.models.generator import Generator
 from deep_privacy.dataset_tools import utils as dataset_utils
-from deep_privacy.data_tools.dataloaders_v2 import cut_bounding_box
+from deep_privacy.data_tools.dataloaders import cut_bounding_box
 from deep_privacy.data_tools.data_utils import denormalize_img
 import deep_privacy.torch_utils as torch_utils
 from deep_privacy.visualization import utils as vis_utils

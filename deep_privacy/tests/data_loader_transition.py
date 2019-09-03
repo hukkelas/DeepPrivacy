@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from deep_privacy.data_tools.dataloaders_v2 import load_dataset
+from deep_privacy.data_tools.dataloaders import load_dataset
 from deep_privacy import torch_utils
 from deep_privacy.data_tools import data_utils
 

@@ -3,7 +3,7 @@ import numpy as np
 from deep_privacy import torch_utils
 import os
 from deep_privacy.inference import infer
-from deep_privacy.data_tools.dataloaders_v2 import load_dataset_files, cut_bounding_box
+from deep_privacy.data_tools.dataloaders import load_dataset_files, cut_bounding_box
 import matplotlib.pyplot as plt
 
 
