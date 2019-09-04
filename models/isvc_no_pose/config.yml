@@ -15,12 +15,12 @@ train_config:
     8: 256
     16: 256
     32: 128
-    64: 72
-    128: 48
+    64: 96
+    128: 64
 
 models:
   start_channel_size: 256
-  pose_size: 14
+  pose_size: 2
   image_channels: 3
   generator:
     running_average_decay: 0.999

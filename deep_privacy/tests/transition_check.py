@@ -3,7 +3,7 @@ import torch
 import os
 import torchvision
 from deep_privacy.models.unet_model import init_model
-from deep_privacy.data_tools.dataloaders_v2 import load_dataset
+from deep_privacy.data_tools.dataloaders import load_dataset
 from deep_privacy.data_tools.data_utils import denormalize_img
 
 dl_train, _ = load_dataset("yfcc100m128", 

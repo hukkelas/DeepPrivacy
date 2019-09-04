@@ -147,7 +147,7 @@ def _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, p
 
     dataloader_train = torch.utils.data.DataLoader(dataset_train,
                                                    batch_size=batch_size,
-                                                   shuffle=False,
+                                                   shuffle=True,
                                                    num_workers=16,
                                                    drop_last=True,
                                                    pin_memory=True,
