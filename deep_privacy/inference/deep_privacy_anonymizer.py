@@ -12,7 +12,7 @@ from . import infer
 class DeepPrivacyAnonymizer(Anonymizer):
 
     def __init__(self, generator, batch_size, use_static_z, save_debug=True, **kwargs):
-        super().__init__(kwargs)
+        super().__init__(*kwargs)
         self.inference_imsize = generator.current_imsize
         self.batch_size = batch_size
         self.pose_size = generator.num_poses * 2

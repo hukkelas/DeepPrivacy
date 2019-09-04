@@ -5,6 +5,13 @@ import random
 gpu_id = sys.argv[1]
 internal_cmd = " ".join(sys.argv[2:])
 
+
+def clean_command(cmd):
+    while "  " in cmd:
+        cmd = cmd.replace("  ", " ")
+    return cmd
+
+
 model_name = internal_cmd
 rm_cmd = ""
 try:
@@ -27,14 +34,15 @@ else:
 os.system("docker rm {}".format(docker_container))
 command = "nvidia-docker run --name {} --ipc=host{}\
         -v /dev/log:/home/haakohu/DeepPrivacy/log -u 1174424 -v {}:/workspace  \
-            -v /work/haakohu/deep_privacy/data/celeba_numpy/:/workspace/data/celeba_numpy/ \
+            -v /work/haakohu/deep_privacy/data/:/workspace/data/ \
            -e CUDA_VISIBLE_DEVICES={}  --log-opt max-size=50m\
           -it  haakohu/pytorch  {}".format(
-            docker_container,
-            rm_cmd,
-            filedir,
-            gpu_id,
-            internal_cmd
-        )
+    docker_container,
+    rm_cmd,
+    filedir,
+    gpu_id,
+    internal_cmd
+)
+command = clean_command(command)
 print(command)
 os.system(command)

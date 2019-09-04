@@ -11,7 +11,7 @@ from deep_privacy.inference import utils as inference_utils
 
 class Anonymizer:
 
-    def __init__(self, face_threshold=.1, keypoint_threshold=.3):
+    def __init__(self, face_threshold=.1, keypoint_threshold=.3, *args, **kwargs):
         super().__init__()
         self.face_threshold = face_threshold
         self.keypoint_threshold = keypoint_threshold
