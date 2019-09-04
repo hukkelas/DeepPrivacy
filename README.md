@@ -1,63 +1,132 @@
 # DeepPrivacy
+![](images/example.gif)
 
-## Requirements
-- Pytorch  1.0.0
+DeepPrivacy is a fully automatic anonymization technique for images.
+This repository contains the source code for the paper *["DeepPrivacy: A Generative Adversarial Network for Face Anonymization"*](google.com), published at ISVC 2019.
+
+![](images/generated_results.png)
+
+The DeepPrivacy GAN never sees any privacy sensitive information, ensuring a fully anonymized image. 
+It utilizes bounding box annotation to identify the privacy-sensitive area, and sparse pose information to guide the network in difficult scenarios.
+![](images/generated_results_annotated.png)
+
+DeepPrivacy detects faces with state-of-the-art detection methods.
+[Mask R-CNN](https://arxiv.org/abs/1703.06870) is used to generate a sparse pose information of the face, and [DSFD](https://arxiv.org/abs/1810.10220) is used to detect faces in the image.
+![](images/overall_architecture.png)
+
+## Citation
+If you find this code useful, please cite the following:
+```
+@article{DeepPrivacy,
+  title={DeepPrivacy: A Generative Adversarial Network for Face Anonymization},
+  author={Håkon Hukkelås, Rudolf Mester and Frank Lindseth },
+  journal={Lecture Notes in Computer Science},
+  publisher={Springer}
+}
+```
+
+## Setting up your environment
+Install the following: 
+- Pytorch  >= 1.0.0
+- Torchvision >= 0.3.0
 - NVIDIA Apex (Master branch)
 - Python >= 3.6
-- Apex for pytorch
-- NVIDIA GPU
 
-Install dependencies 
+Then, install python packages:
 
-```pip install -r requirements.txt``` 
+```pip install -r docker/requirements.txt``` 
 
-## Pre-trained model
-Is included with the submission files. Unzip it to models/large_v2/checkpoints
+### Docker
+In our experiments, we use docker as the virtual environment. 
 
-## Get started 
+Our docker image can be built by running:
+```bash
+cd docker/
 
-Start by setting hyperparameters in a config file. These are normally saved under `models/` directory.
-
-To start training a model:
+docker build -t deep_privacy . 
+```
+Then, training can be started with:
 
 ```bash
-python train.py models/default/config.yml
+nvidia-docker run --rm  -it -v $PWD:/app  -e CUDA_VISIBLE_DEVICES=1 deep_privacy python -m deep_privacy.train models/default/config.yml
 ```
 
-It will automatically look for previous training checkpoints in `models/default/checkpoints`. 
+## Config files
+Hyperparameters and more can be set through config files, named `config.yml`.
 
-Additional arguments can be found with:
+From our paper, the following config files corresponds to our models
 
-```python
-python train.py -h 
-```
+- `models/default/config.yml`: Default 12M parameter model with pose (Max 256 channels in convolutions.)
+- `models/no_pose/config.yml`: Default 12M parameter model without pose
+- **BEST:** `models/large/config.yml`: Default 46M parameter model with pose (Max 512 channels in convolutions). If you have the compute power, we recommend to use this model.
+- `models/deep_discriminator/config.yml`: Default deep discriminator model.
 
-Launch tensorboard
+### Pre-trained models
+For each config file, you can download pre-trained models from the following URLS:
 
-```bash
-tensorboard --logdir summaries/
-```
+- [`models/default/config.yml`]()
+- [`models/no_pose/config.yml`]()
+- [`models/large/config.yml`]()
+- [`models/deep_discriminator/config.yml`]()
 
 ## Automatic inference and anonymization of images
+There are several scripts to perform inference
+
+Every scripts require a path to a `config.yml` file. In these examples, we use the default model with 256 channels in the generator.
+
+### Anonymizing a single image or folder
 
 Run
 ```bash
-python -m deep_privacy.inference.batch_infer [config_path] --source_path /path/to/source/directory --target_path /path/to/taget/directory
+python -m deep_privacy.inference.anonymize_folder model/default/config.yml --source_path testim.jpg --target_path testim_anonymized.jpg
 ```
-By default it will look for images in the folder `test_examples`, and images will be saved to the same path as the config file.
 
+### Anonymizing Videos
 
-
-
-## Get started (Docker)
-
-1. Build docker image file ( Done from same folder as `Dockerfile`) 
-
+Run 
 ```bash
-docker build -t pytorch-gpu-ext . 
+python -m deep_privacy.inference.anonymize_video model/default/config.yml --source_path path/to/video.mp4 --target_path path/to/video_anonymized.mp4
+```
+**Note:** DeepPrivacy is a frame-by-frame method, ensuring no temporal consistency in videos.
+
+
+### Anonymizing WIDER-Face Validation Datset
+Run
+```
+python -m deep_privacy.inference.anonymize_wider models/default/config.yml --source_path path/to/Wider/face/dataset --target_path /path/to/output/folder
+```
+This expects the source path to include the following folders: `WIDER_val` and `wider_face_split`.
+
+
+## Calculate FID scores
+1. Generate real and fake images, where the last argument is the model config:
+```bash
+python -m deep_privacy.metrics.fid_official.calculate_fid models/default/config.yml
 ```
 
-2. Run training with docker (Launch in same folder as `train.py`)
+2. Calculate FID with the official tensorflow code:
 ```bash
-nvidia-docker run --rm  -it -v $PWD:/app  -e CUDA_VISIBLE_DEVICES=1 pytorch-gpu-ext python train.py models/large_v2/config.yml
+python deep_privacy/metrics/fid_official/calculate_fid_official.py models/default/fid_images/real models/default/fid_images/fake
 ```
+Where the two last arguments are the paths to real and fake images.
+
+**NOTE:** We use nvidias tensorflow docker container to run the FID code.: [nvcr.io/nvidia/tensorflow:19.06-py3](https://docs.nvidia.com/deeplearning/frameworks/tensorflow-release-notes/rel_19.06.html#rel_19.06)
+
+
+## Training your own model
+
+Training your own model is easy. First, download our FDF dataset, and put it under `data/fdf`.
+
+Then run:
+```bash
+python -m deep_privacy.train models/default/config.yml
+```
+
+
+## License
+All code is under MIT license, except the following:
+
+Code under [deep_privacy/detection](deep_privacy/detection):
+- DSFD is taken from [https://github.com/hukkelas/DSFD-Pytorch-Inference](https://github.com/hukkelas/DSFD-Pytorch-Inference) and follows APACHE-2.0 License
+- Mask R-CNN implementation is taken from Pytorch source code at [pytorch.org](https://pytorch.org/docs/master/torchvision/models.html#object-detection-instance-segmentation-and-person-keypoint-detection)
+- FID calculation code is taken from the official tensorflow implementation: [https://github.com/bioinf-jku/TTUR](https://github.com/bioinf-jku/TTUR)
