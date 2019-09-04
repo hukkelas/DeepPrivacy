@@ -25,9 +25,11 @@ class SimpleAnonymizer(Anonymizer):
                 x0, y0, x1, y1 = [int(_) for _ in bbox]
                 x0, y0 = max(0, x0), max(0, y0)
                 x1, y1 = min(im.shape[1], x1), min(im.shape[0], y1)
-                if y1 - y0 <= 0 or x1 - x0 <= 0: continue
+                if y1 - y0 <= 0 or x1 - x0 <= 0:
+                    continue
                 face = im[y0:y1, x0:x1]
-                if face.shape[0] == 0 or face.shape[1] == 0: continue
+                if face.shape[0] == 0 or face.shape[1] == 0:
+                    continue
                 orig_shape = face.shape
                 face = self.anonymize_face(face)
                 assert orig_shape == face.shape, f"Did not return equal sized face."

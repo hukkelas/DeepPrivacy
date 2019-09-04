@@ -15,7 +15,7 @@ if __name__ == "__main__":
 
     batch_size = 128
 
-    savedir = os.path.join(".debug","test_examples", "bbox_experiment")
+    savedir = os.path.join(".debug", "test_examples", "bbox_experiment")
     os.makedirs(savedir, exist_ok=True)
     num_iterations = 20
     ims_to_save = []
@@ -29,12 +29,12 @@ if __name__ == "__main__":
 
         to_save = orig.copy()
         to_save = np.tile(to_save, (2, 1, 1))
-        
+
         truncation_levels = np.linspace(0.00, 3, num_iterations)
-        
+
         for i in range(num_iterations):
             im = orig.copy()
-            
+
             p = percentages[i]
             bbox = bounding_boxes[idx].clone().float()
             width = bbox[2] - bbox[0]
@@ -50,13 +50,15 @@ if __name__ == "__main__":
 
             im = torch_utils.image_to_torch(im, cuda=True, normalize_img=True)
             im = generator(im, pose, z.clone())
-            im = torch_utils.image_to_numpy(im.squeeze(), to_uint8=True, denormalize=True)
+            im = torch_utils.image_to_numpy(im.squeeze(),
+                                            to_uint8=True,
+                                            denormalize=True)
 
             im = np.concatenate((orig_to_save.astype(np.uint8), im), axis=0)
             to_save = np.concatenate((to_save, im), axis=1)
         ims_to_save.append(to_save)
     savepath = os.path.join(savedir, f"result_image.jpg")
-    
+
     ims_to_save = np.concatenate(ims_to_save, axis=0)
     plt.imsave(savepath, ims_to_save)
 

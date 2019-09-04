@@ -4,6 +4,7 @@ from deep_privacy.models.custom_layers import WSConv2d, WSLinear, MinibatchStdLa
 from deep_privacy.models.utils import generate_pose_channel_images, get_transition_value
 from deep_privacy.models.base_model import ProgressiveBaseModel
 
+
 def conv_module_bn(dim_in, dim_out, kernel_size, padding):
     return nn.Sequential(
         WSConv2d(dim_in, dim_out, kernel_size, padding),
@@ -18,7 +19,7 @@ class ResNetBlock(nn.Module):
         blocks = []
         for i in range(num_conv):
             blocks.append(
-           conv_module_bn(num_channels, num_channels, 3, 1)
+                conv_module_bn(num_channels, num_channels, 3, 1)
             )
         self.conv = nn.Sequential(*blocks)
 
@@ -31,7 +32,7 @@ class ResNetBlock(nn.Module):
 
 class Discriminator(ProgressiveBaseModel):
 
-    def __init__(self, 
+    def __init__(self,
                  image_channels,
                  start_channel_dim,
                  pose_size
@@ -39,15 +40,18 @@ class Discriminator(ProgressiveBaseModel):
         start_channel_dim = int(start_channel_dim*(2**0.5))
         start_channel_dim = start_channel_dim // 8 * 8
         super().__init__(pose_size, start_channel_dim, image_channels)
-        
-        self.from_rgb_new = conv_module_bn(image_channels*2, start_channel_dim, 1, 0)
 
-        self.from_rgb_old = conv_module_bn(image_channels*2, start_channel_dim, 1, 0)
+        self.from_rgb_new = conv_module_bn(image_channels*2,
+                                           start_channel_dim, 1, 0)
+
+        self.from_rgb_old = conv_module_bn(image_channels*2,
+                                           start_channel_dim, 1, 0)
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
             nn.Sequential(
-                #MinibatchStdLayer(),
-                conv_module_bn(start_channel_dim + self.num_poses, start_channel_dim, 3, 1),
+                # MinibatchStdLayer(),
+                conv_module_bn(start_channel_dim + self.num_poses,
+                               start_channel_dim, 3, 1),
                 conv_module_bn(start_channel_dim, start_channel_dim, 4, 0),
             )
         )
@@ -55,7 +59,7 @@ class Discriminator(ProgressiveBaseModel):
         self.output_layer = WSLinear(start_channel_dim, 1)
 
     def extend(self):
-        input_dim = self.transition_channels[self.transition_step] 
+        input_dim = self.transition_channels[self.transition_step]
         output_dim = self.prev_channel_extension
         if self.transition_step != 0:
             self.core_model = nn.Sequential(
@@ -66,7 +70,8 @@ class Discriminator(ProgressiveBaseModel):
             nn.AvgPool2d([2, 2]),
             self.from_rgb_new
         )
-        self.from_rgb_new = conv_module_bn(self.image_channels*2, input_dim, 1, 0)
+        self.from_rgb_new = conv_module_bn(self.image_channels*2,
+                                           input_dim, 1, 0)
         self.from_rgb_new = self.from_rgb_new
         self.new_block = nn.Sequential(
             conv_module_bn(input_dim+self.num_poses, input_dim, 3, 1),
@@ -102,20 +107,23 @@ class Discriminator(ProgressiveBaseModel):
 
 class DeepDiscriminator(ProgressiveBaseModel):
 
-    def __init__(self, 
+    def __init__(self,
                  image_channels,
                  start_channel_dim,
                  pose_size
                  ):
         super().__init__(pose_size, start_channel_dim, image_channels)
-        
-        self.from_rgb_new = conv_module_bn(image_channels*2, start_channel_dim, 1, 0)
 
-        self.from_rgb_old = conv_module_bn(image_channels*2, start_channel_dim, 1, 0)
+        self.from_rgb_new = conv_module_bn(image_channels*2,
+                                           start_channel_dim, 1, 0)
+
+        self.from_rgb_old = conv_module_bn(image_channels*2,
+                                           start_channel_dim, 1, 0)
         self.new_block = nn.Sequential()
         self.core_model = nn.Sequential(
             nn.Sequential(
-                conv_module_bn(start_channel_dim + self.num_poses, start_channel_dim, 1, 0),
+                conv_module_bn(start_channel_dim + self.num_poses,
+                               start_channel_dim, 1, 0),
                 ResNetBlock(start_channel_dim, 3),
                 conv_module_bn(start_channel_dim, start_channel_dim, 4, 0)
             )
@@ -135,7 +143,8 @@ class DeepDiscriminator(ProgressiveBaseModel):
             nn.AvgPool2d([2, 2]),
             self.from_rgb_new
         )
-        self.from_rgb_new = conv_module_bn(self.image_channels*2, input_dim, 1, 0)
+        self.from_rgb_new = conv_module_bn(self.image_channels*2,
+                                           input_dim, 1, 0)
         self.from_rgb_new = self.from_rgb_new
         self.new_block = nn.Sequential(
             conv_module_bn(input_dim + self.num_poses, input_dim, 1, 0),

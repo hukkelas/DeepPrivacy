@@ -14,7 +14,8 @@ class DataPrefetcher():
 
     def preload(self):
         try:
-            self.next_image, self.next_condition, self.next_landmark = next(self.loader)
+            self.next_image, self.next_condition, self.next_landmark = next(
+                self.loader)
         except StopIteration:
             self.next_image = None
             self.next_condition = None
@@ -22,7 +23,8 @@ class DataPrefetcher():
             return
         with torch.cuda.stream(self.stream):
             self.next_image = self.next_image.cuda(non_blocking=True).float()
-            self.next_condition = self.next_condition.cuda(non_blocking=True).float()
+            self.next_condition = self.next_condition.cuda(
+                non_blocking=True).float()
             self.next_landmark = self.next_landmark.cuda(non_blocking=True)
 
             self.next_image = interpolate_image(self.pool,

@@ -22,7 +22,7 @@ def load_config(config_path):
 def validate_start_channel_size(max_imsize, start_channel_size):
     # Assert start channel size is valid with the max imsize
     # Number of times to double
-    n_image_double =  math.log(max_imsize, 2) - 2 # starts at 4
+    n_image_double = math.log(max_imsize, 2) - 2  # starts at 4
     n_channel_halving = math.log(start_channel_size, 2) + 2
     assert n_image_double < n_channel_halving
 
@@ -37,7 +37,7 @@ def print_config(dic, namespace="", first=False):
             new_namespace = key
         else:
             new_namespace = "{}.{}".format(namespace, key)
-        
+
         if "_asdict" in dir(item):
             print_config(item, new_namespace, False)
         else:
@@ -47,8 +47,10 @@ def print_config(dic, namespace="", first=False):
 
 
 def validate_config(config):
-    assert config.train_config.amp_opt_level in ["O1","O0"], "Optimization level not correct. It was: {}".format(config.opt_level)
-    validate_start_channel_size(config.max_imsize, config.models.start_channel_size)
+    assert config.train_config.amp_opt_level in [
+        "O1", "O0"], "Optimization level not correct. It was: {}".format(config.opt_level)
+    validate_start_channel_size(config.max_imsize,
+                                config.models.start_channel_size)
 
 
 def initialize_and_validate_config(additional_arguments=[]):
@@ -56,15 +58,16 @@ def initialize_and_validate_config(additional_arguments=[]):
     parser.add_argument("config_path",
                         help="Set the name of the model")
     for additional_arg in additional_arguments:
-        parser.add_argument(f'--{additional_arg["name"]}', default=additional_arg["default"])
+        parser.add_argument(f'--{additional_arg["name"]}',
+                            default=additional_arg["default"])
 
     args = parser.parse_args()
     assert os.path.isfile(args.config_path), "Did not find config file: {}".format(args.config_path)
 
     config = load_config(args.config_path)
-    
+
     config_dir = os.path.dirname(args.config_path)
-    
+
     new_config_fields = {
         "config_path": args.config_path,
         "checkpoint_dir": os.path.join(config_dir, "checkpoints"),

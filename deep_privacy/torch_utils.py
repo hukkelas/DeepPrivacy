@@ -12,8 +12,8 @@ def image_to_numpy(images, to_uint8=False, denormalize=False):
     if denormalize:
         images = data_utils.denormalize_img(images)
     images = images.detach().cpu().numpy()
-    r,g,b = images[:, 0], images[:, 1], images[:, 2]
-    images = np.stack((r,g,b), axis=3)
+    r, g, b = images[:, 0], images[:, 1], images[:, 2]
+    images = np.stack((r, g, b), axis=3)
     if to_uint8:
         images = (images*255).astype(np.uint8)
     if single_image:

@@ -52,7 +52,9 @@ if __name__ == "__main__":
             orig_to_save = im.copy()
             im = torch_utils.image_to_torch(im, cuda=True, normalize_img=True)
             im = generator(im, pose, z.clone())
-            im = torch_utils.image_to_numpy(im.squeeze(), to_uint8=True, denormalize=True)
+            im = torch_utils.image_to_numpy(im.squeeze(),
+                                            to_uint8=True,
+                                            denormalize=True)
             im = np.concatenate((orig_to_save.astype(np.uint8),
                                  im,
                                  anonymized_test.astype(np.uint8)),

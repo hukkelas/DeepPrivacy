@@ -59,7 +59,8 @@ def shift_bbox(orig_bbox, expanded_bbox, new_imsize):
 
 
 def keypoint_to_torch(keypoint):
-    keypoint = np.array([keypoint[i, j] for i in range(keypoint.shape[0]) for j in range(2)])
+    keypoint = np.array([keypoint[i, j]
+                         for i in range(keypoint.shape[0]) for j in range(2)])
     keypoint = torch.from_numpy(keypoint).view(1, -1)
     return keypoint
 
@@ -117,7 +118,8 @@ def replace_face(im, generated_face, image_mask, original_bbox, expanded_bbox):
     assert expanded_bbox[2] - expanded_bbox[0] == generated_face.shape[1], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
     assert expanded_bbox[3] - expanded_bbox[1] == generated_face.shape[0], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
 
-    bbox_to_extract = np.array([0, 0, generated_face.shape[1], generated_face.shape[0]])
+    bbox_to_extract = np.array(
+        [0, 0, generated_face.shape[1], generated_face.shape[0]])
     for i in range(2):
         if expanded_bbox[i] < 0:
             bbox_to_extract[i] -= expanded_bbox[i]
@@ -131,16 +133,19 @@ def replace_face(im, generated_face, image_mask, original_bbox, expanded_bbox):
         bbox_to_extract[3] -= diff
         expanded_bbox[3] = im.shape[0]
 
-    im = stitch_face(im, expanded_bbox, generated_face, bbox_to_extract, image_mask, original_bbox)
+    im = stitch_face(im, expanded_bbox, generated_face,
+                     bbox_to_extract, image_mask, original_bbox)
     return im
 
 
 def post_process(im, generated_face, expanded_bbox, original_bbox, image_mask):
     generated_face = denormalize_img(generated_face)
-    generated_face = torch_utils.image_to_numpy(generated_face[0], to_uint8=True)
+    generated_face = torch_utils.image_to_numpy(
+        generated_face[0], to_uint8=True)
     orig_imsize = expanded_bbox[2] - expanded_bbox[0]
     generated_face = cv2.resize(generated_face, (orig_imsize, orig_imsize))
-    im = replace_face(im, generated_face, image_mask, original_bbox, expanded_bbox)
+    im = replace_face(im, generated_face, image_mask,
+                      original_bbox, expanded_bbox)
     return im
 
 
@@ -152,9 +157,9 @@ def get_default_target_path(source_path, target_path, config_path):
         assert len(basename) == 2
         return f"{basename[0]}_anonymized.mp4"
     default_path = os.path.join(
-            os.path.dirname(config_path),
-            "anonymized_images"
-        )
+        os.path.dirname(config_path),
+        "anonymized_images"
+    )
     print("Setting target path to default:", default_path)
     return default_path
 

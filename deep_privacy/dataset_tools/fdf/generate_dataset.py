@@ -64,7 +64,8 @@ def match_bbox_keypoint(bounding_boxes, keypoints):
     """
     if len(bounding_boxes) == 0 or len(keypoints) == 0:
         return None, None
-    assert bounding_boxes.shape[1] == 5, "Shape was : {}".format(bounding_boxes.shape)
+    assert bounding_boxes.shape[1] == 5, "Shape was : {}".format(
+        bounding_boxes.shape)
     assert keypoints.shape[1:] == (4, 7), "Keypoint shape was: {}".format(keypoints.shape)
     # Sort after score
     sorted_idx = np.argsort(bounding_boxes[:, 4])[::-1]
@@ -105,7 +106,8 @@ def process_face(bbox, landmark, imshape, imname):
     bbox = bbox.astype("int")
     landmark[0] -= expanded_bbox[0]
     landmark[1] -= expanded_bbox[1]
-    landmark = np.array([landmark[j, i] for i in range(landmark.shape[1]) for j in range(2)])
+    landmark = np.array([landmark[j, i]
+                         for i in range(landmark.shape[1]) for j in range(2)])
     return {
         "expanded_bbox": expanded_bbox,
         "face_bbox": bbox,
@@ -143,7 +145,8 @@ def process_image(imname):
 
 def pool(img):
     img = img.astype(np.float32)
-    img = (img[0::2, 0::2] + img[0::2, 1::2] + img[1::2, 0::2] + img[1::2, 1::2]) * 0.25
+    img = (img[0::2, 0::2] + img[0::2, 1::2] +
+           img[1::2, 0::2] + img[1::2, 1::2]) * 0.25
     img = img.astype(np.uint8)
     return img
 
@@ -186,7 +189,8 @@ def save_annotation(bounding_boxes, landmarks, sizes):
         landmark_to_save = normalized_landmark / sizes * imsize
         landmark_to_save = torch.from_numpy(landmark_to_save)
 
-        target_path = os.path.join(LANDMARK_TARGET_DIR, "{}.torch".format(imsize))
+        target_path = os.path.join(LANDMARK_TARGET_DIR,
+                                   "{}.torch".format(imsize))
         torch.save(landmark_to_save, target_path)
 
 
@@ -200,7 +204,7 @@ def extract_annotations_and_save(image_annotations):
             bounding_boxes.append(annotation["face_bbox"])
             landmarks.append(annotation["landmark"])
             x0, y0, x1, y1 = annotation["expanded_bbox"]
-            assert int(y1 - y0) == int(x1 - x0), "Expected image to have equal sizes. Was: {}, {}".format(x1- x0, y1 - y0)
+            assert int(y1 - y0) == int(x1 - x0), "Expected image to have equal sizes. Was: {}, {}".format(x1 - x0, y1 - y0)
             sizes.append(y1 - y0)
     bounding_boxes = np.stack(bounding_boxes, axis=0)
     landmarks = np.stack(landmarks, axis=0)

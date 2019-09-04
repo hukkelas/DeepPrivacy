@@ -4,7 +4,8 @@ from .dsfd.detect import DSFDDetector
 from . import keypoint_rcnn
 from .utils import match_bbox_keypoint
 
-face_detector = DSFDDetector("deep_privacy/detection/dsfd/weights/WIDERFace_DSFD_RES152.pth")
+face_detector = DSFDDetector(
+    "deep_privacy/detection/dsfd/weights/WIDERFace_DSFD_RES152.pth")
 
 
 def clip_detections(detections, imshape):
@@ -23,14 +24,15 @@ def batch_detect_faces(images, face_threshold=0.5):
         det = face_detector.detect_face(im[:, :, ::-1], face_threshold)
         det = det[:, :4].astype(int)
         im_bboxes.append(det)
-    im_bboxes = [clip_detections(dets, im.shape) 
+    im_bboxes = [clip_detections(dets, im.shape)
                  for dets, im in zip(im_bboxes, images)]
     return im_bboxes
 
 
 def detect_faces_with_keypoints(img, face_threshold=0.5, keypoint_threshold=0.3):
     face_bboxes = face_detector.detect_face(img[:, :, ::-1], face_threshold)
-    keypoints = keypoint_rcnn.detect_keypoints(img, keypoint_threshold)[:, :7, :]
+    keypoints = keypoint_rcnn.detect_keypoints(img,
+                                               keypoint_threshold)[:, :7, :]
     face_bboxes, keypoints = match_bbox_keypoint(face_bboxes, keypoints)
     return face_bboxes, keypoints
 
@@ -39,7 +41,8 @@ def batch_detect_faces_with_keypoints(images, face_threshold=.5, keypoint_thresh
     if im_bboxes is None:
         im_bboxes = batch_detect_faces(images, face_threshold)
 
-    keypoints = keypoint_rcnn.batch_detect_keypoints(images, keypoint_threshold)
+    keypoints = keypoint_rcnn.batch_detect_keypoints(
+        images, keypoint_threshold)
     for i in range(len(im_bboxes)):
         face_bboxes = im_bboxes[i]
         face_kps = keypoints[i][:, :7, :]

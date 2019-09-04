@@ -24,9 +24,13 @@ class Anonymizer:
             folder_path = folder_path[:-1]
         image_paths = infer.get_images_recursive(folder_path)
 
-        relative_paths = [impath[len(folder_path)+1:] for impath in image_paths]
-        save_paths = [os.path.join(save_path, impath) for impath in relative_paths]
-        self.anonymize_image_paths(image_paths, save_paths, im_bboxes=im_bboxes)
+        relative_paths = [impath[len(folder_path)+1:]
+                          for impath in image_paths]
+        save_paths = [os.path.join(save_path, impath)
+                      for impath in relative_paths]
+        self.anonymize_image_paths(image_paths,
+                                   save_paths,
+                                   im_bboxes=im_bboxes)
 
     def anonymize_image_paths(self, image_paths, save_paths, im_bboxes=None):
         images = [cv2.imread(p)[:, :, ::-1] for p in image_paths]
@@ -72,22 +76,28 @@ class Anonymizer:
         subclip = original_video.subclip(start_frame/fps, end_frame/fps)
         print("="*80)
         print("Anonymizing video.")
-        print(f"Duration: {original_video.duration}. Total frames: {total_frames}, FPS: {fps}")
-        print(f"Anonymizing from: {start_frame}({start_frame/fps}), to: {end_frame}({end_frame/fps})")
+        print(
+            f"Duration: {original_video.duration}. Total frames: {total_frames}, FPS: {fps}")
+        print(
+            f"Anonymizing from: {start_frame}({start_frame/fps}), to: {end_frame}({end_frame/fps})")
 
         frames = list(tqdm.tqdm(subclip.iter_frames(), desc="Reading frames",
                                 total=end_frame - start_frame))
         if with_keypoints:
-            im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(frames)
+            im_bboxes, im_keypoints = detection_api.batch_detect_faces_with_keypoints(
+                frames)
             im_bboxes, im_keypoints = inference_utils.filter_image_bboxes(
-                im_bboxes, im_keypoints, 
+                im_bboxes, im_keypoints,
                 [im.shape for im in frames],
                 max_face_size,
                 filter_type="width"
             )
-            anonymized_frames = self.anonymize_images(frames, im_keypoints, im_bboxes)
+            anonymized_frames = self.anonymize_images(frames,
+                                                      im_keypoints,
+                                                      im_bboxes)
         else:
-            im_bboxes = detection_api.batch_detect_faces(frames, self.face_threshold)
+            im_bboxes = detection_api.batch_detect_faces(frames,
+                                                         self.face_threshold)
             im_keypoints = None
             anonymized_frames = self.anonymize_images(frames, im_bboxes)
 
@@ -100,13 +110,13 @@ class Anonymizer:
                 radius=None,
                 black_out_face=anonymize_source)
             return np.concatenate((orig_frame, anonymized_frame), axis=1)
-        
+
         anonymized_video = mp.VideoClip(make_frame)
         anonymized_video.duration = (end_frame - start_frame) / fps
         anonymized_video.fps = fps
         to_concatenate = []
         if start_frame != 0:
-            to_concatenate.append(original_video.subclip(0, start_frame/fps)) 
+            to_concatenate.append(original_video.subclip(0, start_frame/fps))
         to_concatenate.append(anonymized_video)
         if end_frame != total_frames:
             to_concatenate.append(original_video.subclip(end_frame/fps, total_frames/fps))

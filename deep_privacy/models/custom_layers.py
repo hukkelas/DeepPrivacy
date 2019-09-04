@@ -10,27 +10,28 @@ class WSConv2d(nn.Module):
     This is the wt scaling conv layer layer. Initialize with N(0, scale). Then 
     it will multiply the scale for every forward pass
     """
+
     def __init__(self, inCh, outCh, kernelSize, padding, gain=np.sqrt(2)):
         super().__init__()
-        self.conv = nn.Conv2d(in_channels=inCh, out_channels=outCh, kernel_size=kernelSize, stride=1, padding=padding)
+        self.conv = nn.Conv2d(in_channels=inCh, out_channels=outCh,
+                              kernel_size=kernelSize, stride=1, padding=padding)
 
         # new bias to use after wscale
         bias = self.conv.bias
         self.bias = nn.Parameter(bias.view(1, bias.shape[0], 1, 1))
         self.conv.bias = None
-        
+
         # calc wt scale
         convShape = list(self.conv.weight.shape)
-        fanIn = np.prod(convShape[1:]) # Leave out # of op filters
+        fanIn = np.prod(convShape[1:])  # Leave out # of op filters
         self.wtScale = gain/np.sqrt(fanIn)
-        
+
         # init
         nn.init.normal_(self.conv.weight)
         nn.init.constant_(self.bias, val=0)
-        self.name = '(inp = %s)' % (self.conv.__class__.__name__ + str(convShape))
-        
+        self.name = f"{self.conv.__class__.__name__}-{str(convShape)}"
+
     def forward(self, x):
-        #return self.conv(x)
         return self.conv(x * self.wtScale) + self.bias
 
     def __repr__(self):
@@ -61,7 +62,7 @@ class PixelwiseNormalization(nn.Module):
 
     @amp.float_function
     def forward(self, x):
-        factor = ((x**2 ).mean(dim=1, keepdim=True) + 1e-8)**0.5
+        factor = ((x**2).mean(dim=1, keepdim=True) + 1e-8)**0.5
         return x / factor
 
 
@@ -80,9 +81,11 @@ class MinibatchStdLayer(nn.Module):
         super().__init__()
 
     def forward(self, x, group_size=4):
-        group_size = min(group_size, x.shape[0]) # group_size must be smaller than minibatch size
+        # group_size must be smaller than minibatch size
+        group_size = min(group_size, x.shape[0])
         channels, height, width = x.shape[1:]
-        y = x.view(group_size, -1, *x.shape[1:]) # Add extra "group" dimension and let minibatch size compensate
+        # Add extra "group" dimension and let minibatch size compensate
+        y = x.view(group_size, -1, *x.shape[1:])
         y = y.float()
         y -= y.mean(dim=0, keepdim=True)
         y = y.pow(2).mean(dim=0)

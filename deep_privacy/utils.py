@@ -41,12 +41,14 @@ def load_checkpoint(ckpt_dir_or_file, load_best=False, map_location=None):
             ckpt_path = os.path.join(ckpt_dir_or_file, 'best_model.ckpt')
         else:
             with open(os.path.join(ckpt_dir_or_file, 'latest_checkpoint')) as f:
-                if True:
+                if False:
                     ckpt_paths = f.readlines()
-                    ckpt_path = [_.strip() for _ in ckpt_paths if "30000000" in _][0]
+                    ckpt_path = [_.strip()
+                                 for _ in ckpt_paths if "30000000" in _][0]
                     ckpt_path = os.path.join(ckpt_dir_or_file, ckpt_path)
                 else:
-                    ckpt_path = os.path.join(ckpt_dir_or_file, f.readline()[:-1])
+                    ckpt_path = os.path.join(ckpt_dir_or_file,
+                                             f.readline()[:-1])
     else:
         ckpt_path = ckpt_dir_or_file
     ckpt = torch.load(ckpt_path, map_location=map_location)

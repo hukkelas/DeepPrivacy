@@ -19,7 +19,8 @@ class DeepPrivacyAnonymizer(Anonymizer):
         self.generator = generator
         self.use_static_z = use_static_z
         if self.use_static_z:
-            self.static_z = self.generator.generate_latent_variable(self.batch_size, "cuda", torch.float32).zero_()
+            self.static_z = self.generator.generate_latent_variable(
+                self.batch_size, "cuda", torch.float32).zero_()
         self.save_debug = save_debug
         self.debug_directory = os.path.join(".debug", "inference")
         if self.save_debug:
@@ -28,7 +29,9 @@ class DeepPrivacyAnonymizer(Anonymizer):
     def anonymize_images(self, images, im_keypoints, im_bboxes):
         face_info = self.pre_process_faces(images, im_keypoints, im_bboxes)
         generated_faces = self.anonymize_faces(face_info)
-        anonymized_images = self.post_process(face_info, generated_faces, images)
+        anonymized_images = self.post_process(face_info,
+                                              generated_faces,
+                                              images)
         if self.save_debug:
             self.save_debug_images(face_info, generated_faces)
         return anonymized_images
@@ -44,7 +47,8 @@ class DeepPrivacyAnonymizer(Anonymizer):
                                                         to_uint8=True,
                                                         denormalize=True)
             to_save = np.concatenate((torch_input, generated_face), axis=1)
-            filepath = os.path.join(self.debug_directory, f"face_{face_idx}.jpg")
+            filepath = os.path.join(self.debug_directory,
+                                    f"face_{face_idx}.jpg")
             cv2.imwrite(filepath, to_save[:, :, ::-1])
 
     def pre_process_faces(self, images, im_keypoints, im_bboxes):

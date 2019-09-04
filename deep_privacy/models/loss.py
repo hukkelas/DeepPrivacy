@@ -18,7 +18,7 @@ def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks, 
         inputs=x_hat,
         grad_outputs=torch.ones(logits.shape).to(fake_data.dtype).to(fake_data.device),
         create_graph=True
-    )[0] 
+    )[0]
     grad = grad.view(x_hat.shape[0], -1)
 
     grad_penalty = ((grad.norm(p=2, dim=1) - 1)**2)
@@ -53,10 +53,10 @@ class WGANLoss:
             inputs=x_hat,
             grad_outputs=torch.ones(logits.shape).to(fake_data.dtype).to(fake_data.device),
             create_graph=True
-        )[0] 
+        )[0]
         grad = grad.view(x_hat.shape[0], -1)
         gradient_pen = ((grad.norm(p=2, dim=1) - 1)**2)
-        to_backward = gradient_pen.sum() * 10 
+        to_backward = gradient_pen.sum() * 10
         with amp.scale_loss(to_backward, self.d_optimizer, loss_id=1) as scaled_loss:
             scaled_loss.backward(retain_graph=True)
         return gradient_pen.detach().mean()
@@ -76,7 +76,10 @@ class WGANLoss:
         epsilon_penalty = (real_scores ** 2).squeeze()
 
         self.d_optimizer.zero_grad()
-        gradient_pen = self.compute_gradient_penalty(real_data, fake_data, condition, landmarks)
+        gradient_pen = self.compute_gradient_penalty(real_data,
+                                                     fake_data,
+                                                     condition,
+                                                     landmarks)
 
         to_backward1 = (- wasserstein_distance).sum()
         with amp.scale_loss(to_backward1, self.d_optimizer, loss_id=0) as scaled_loss:
@@ -95,7 +98,6 @@ class WGANLoss:
         fake_scores = self.discriminator(
             fake_data, condition, landmarks)
         G_loss = (-fake_scores).sum()
-
 
         self.g_optimizer.zero_grad()
         with amp.scale_loss(G_loss, self.g_optimizer, loss_id=3) as scaled_loss:

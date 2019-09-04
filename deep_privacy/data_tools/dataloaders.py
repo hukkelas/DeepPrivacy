@@ -105,13 +105,16 @@ def load_images(dirpath, load_fraction):
 
 def load_dataset_files(dirpath, imsize, load_fraction):
     print("loading images from:", dirpath)
-    images = load_images(os.path.join(dirpath, "images", str(imsize)), load_fraction)
+    images = load_images(os.path.join(dirpath,
+                                      "images",
+                                      str(imsize)),
+                         load_fraction)
     bounding_box_filepath = os.path.join(
         dirpath, "bounding_box", "{}.npy".format(imsize))
     assert os.path.isfile(bounding_box_filepath), "Did not find the bounding box data. Looked in: {}".format(
         bounding_box_filepath)
     bounding_boxes = np.load(bounding_box_filepath)
-    bounding_boxes = torch.from_numpy(bounding_boxes).long() 
+    bounding_boxes = torch.from_numpy(bounding_boxes).long()
 
     landmark_filepath = os.path.join(
         dirpath, "landmarks", "{}.npy".format(imsize))
@@ -123,7 +126,7 @@ def load_dataset_files(dirpath, imsize, load_fraction):
         bounding_boxes = torch.cat([bounding_boxes[:len(images) - MAX_VALIDATION_SIZE],
                                     bounding_boxes[-MAX_VALIDATION_SIZE:]])
         landmarks = torch.cat([landmarks[:len(images) - MAX_VALIDATION_SIZE],
-                               landmarks[-MAX_VALIDATION_SIZE:]]) 
+                               landmarks[-MAX_VALIDATION_SIZE:]])
     return images, bounding_boxes, landmarks
 
 
@@ -140,7 +143,9 @@ def _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, p
     bbox_train, bbox_val = bounding_boxes[:-MAX_VALIDATION_SIZE], bounding_boxes[-validation_size:]
     lm_train, lm_val = landmarks[:-MAX_VALIDATION_SIZE], landmarks[-validation_size:]
 
-    dataset_train = DeepPrivacyDataset(images_train, bbox_train, lm_train, True)
+    dataset_train = DeepPrivacyDataset(images_train,
+                                       bbox_train,
+                                       lm_train, True)
     dataset_val = DeepPrivacyDataset(images_val, bbox_val, lm_val, False)
     print("LEN DATASET VAL:", len(dataset_val), len(images_val))
 
@@ -158,7 +163,8 @@ def _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, p
                                                  drop_last=True,
                                                  pin_memory=True,
                                                  collate_fn=fast_collate)
-    dataloader_train = DataPrefetcher(dataloader_train, pose_size, dataset_train)
+    dataloader_train = DataPrefetcher(dataloader_train,
+                                      pose_size, dataset_train)
     dataloader_val = DataPrefetcher(dataloader_val, pose_size, dataset_val)
     return dataloader_train, dataloader_val
 
@@ -190,7 +196,9 @@ def cut_bounding_box(condition, bounding_boxes, transition_variable):
     bounding_boxes = bounding_boxes.clone()
     if transition_variable != 1:
         bounding_boxes_0 = bounding_boxes // 2 * 2
-        bounding_boxes = model_utils.get_transition_value(bounding_boxes_0.float(), bounding_boxes.float(), transition_variable).long()
+        bounding_boxes = model_utils.get_transition_value(bounding_boxes_0.float(),
+                                                          bounding_boxes.float(),
+                                                          transition_variable).long()
 
     x0, y0, x1, y1 = [k.item() for k in bounding_boxes]
     if x0 >= x1 or y0 >= y1:

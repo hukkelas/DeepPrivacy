@@ -34,4 +34,3 @@ def filter_image_bboxes(im_bboxes, im_keypoints, imshapes, max_face_size, filter
         new_boxes.append(bboxes)
         new_keypoints.append(keypoints)
     return new_boxes, new_keypoints
-

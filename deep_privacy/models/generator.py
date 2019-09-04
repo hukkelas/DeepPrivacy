@@ -12,6 +12,7 @@ def conv_bn_relu(in_dim, out_dim, kernel_size, padding=0):
         PixelwiseNormalization()
     )
 
+
 class UnetDownSamplingBlock(nn.Module):
 
     def __init__(self, in_dim, out_dim):
@@ -47,15 +48,18 @@ class Generator(ProgressiveBaseModel):
                  image_channels):
         super().__init__(pose_size, start_channel_dim, image_channels)
         # Transition blockss
-        self.to_rgb_new = WSConv2d(start_channel_dim, self.image_channels, 1, 0)
-        self.to_rgb_old = WSConv2d(start_channel_dim, self.image_channels, 1, 0)
+        self.to_rgb_new = WSConv2d(
+            start_channel_dim, self.image_channels, 1, 0)
+        self.to_rgb_old = WSConv2d(
+            start_channel_dim, self.image_channels, 1, 0)
 
         self.core_blocks_down = nn.ModuleList([
             UnetDownSamplingBlock(start_channel_dim, start_channel_dim)
         ])
         self.core_blocks_up = nn.ModuleList([
             nn.Sequential(
-                conv_bn_relu(start_channel_dim+self.num_poses+32, start_channel_dim, 1, 0),
+                conv_bn_relu(start_channel_dim+self.num_poses +
+                             32, start_channel_dim, 1, 0),
                 UnetUpsamplingBlock(start_channel_dim, start_channel_dim)
             )
         ])
@@ -63,9 +67,11 @@ class Generator(ProgressiveBaseModel):
         self.new_up = nn.Sequential()
         self.old_up = nn.Sequential()
         self.new_down = nn.Sequential()
-        self.from_rgb_new = conv_bn_relu(self.image_channels, start_channel_dim, 1, 0)
-        self.from_rgb_old =  conv_bn_relu(self.image_channels, start_channel_dim, 1, 0)
-        
+        self.from_rgb_new = conv_bn_relu(
+            self.image_channels, start_channel_dim, 1, 0)
+        self.from_rgb_old = conv_bn_relu(
+            self.image_channels, start_channel_dim, 1, 0)
+
         self.upsampling = UpSamplingBlock()
         self.downsampling = nn.AvgPool2d(2)
 
@@ -88,7 +94,8 @@ class Generator(ProgressiveBaseModel):
             core_blocks_down = nn.ModuleList()
 
             core_blocks_down.append(self.new_down)
-            first = [nn.AvgPool2d(2)] + list(self.core_blocks_down[0].children())
+            first = [nn.AvgPool2d(2)] + \
+                list(self.core_blocks_down[0].children())
             core_blocks_down.append(nn.Sequential(*first))
             core_blocks_down.extend(self.core_blocks_down[1:])
 
@@ -97,7 +104,7 @@ class Generator(ProgressiveBaseModel):
             self.new_up = nn.Sequential(*new_up_blocks)
             self.core_blocks_up.append(self.new_up)
 
-        self.from_rgb_new =  conv_bn_relu(self.image_channels, output_dim, 1, 0)
+        self.from_rgb_new = conv_bn_relu(self.image_channels, output_dim, 1, 0)
         self.new_down = nn.Sequential(
             UnetDownSamplingBlock(output_dim, self.prev_channel_extension)
         )
@@ -107,14 +114,17 @@ class Generator(ProgressiveBaseModel):
         self.to_rgb_new = WSConv2d(output_dim, self.image_channels, 1, 0)
 
         self.new_up = nn.Sequential(
-            conv_bn_relu(self.prev_channel_extension*2+self.num_poses, self.prev_channel_extension, 1, 0),
+            conv_bn_relu(self.prev_channel_extension*2 +
+                         self.num_poses, self.prev_channel_extension, 1, 0),
             UnetUpsamplingBlock(self.prev_channel_extension, output_dim)
         )
         super().extend()
 
     def new_parameters(self):
-        new_paramters = list(self.new_down.parameters()) + list(self.to_rgb_new.parameters())
-        new_paramters += list(self.new_up.parameters()) + list(self.from_rgb_new.parameters())
+        new_paramters = list(self.new_down.parameters()) + \
+            list(self.to_rgb_new.parameters())
+        new_paramters += list(self.new_up.parameters()) + \
+            list(self.from_rgb_new.parameters())
         return new_paramters
 
     def generate_latent_variable(self, *args):
@@ -128,7 +138,8 @@ class Generator(ProgressiveBaseModel):
             return torch.randn(batch_size, 32, 4, 4,
                                device=device,
                                dtype=dtype)
-        raise ValueError(f"Expected either x_in or (batch_size, device, dtype. Got: {args}")
+        raise ValueError(
+            f"Expected either x_in or (batch_size, device, dtype. Got: {args}")
 
     def forward(self, x_in, pose_info, z=None):
         if z is None:
@@ -149,7 +160,7 @@ class Generator(ProgressiveBaseModel):
             unet_skips.append(x)
         x = self.core_blocks_down[-1](x)
         pose_channels = generate_pose_channel_images(4,
-                                                     self.current_imsize, 
+                                                     self.current_imsize,
                                                      x_in.device,
                                                      pose_info,
                                                      x_in.dtype)
@@ -158,7 +169,8 @@ class Generator(ProgressiveBaseModel):
 
         for idx, block in enumerate(self.core_blocks_up[1:]):
             skip_x = unet_skips[-idx-1]
-            assert skip_x.shape == x.shape, "IDX: {}, skip_x: {}, x: {}".format(idx, skip_x.shape, x.shape)
+            assert skip_x.shape == x.shape, "IDX: {}, skip_x: {}, x: {}".format(
+                idx, skip_x.shape, x.shape)
             x = torch.cat((x, skip_x, pose_channels[idx+1]), dim=1)
             x = block(x)
 

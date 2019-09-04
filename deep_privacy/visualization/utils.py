@@ -19,7 +19,7 @@ def draw_faces_with_keypoints(
         im_keypoints,
         radius=None,
         black_out_face=False
-        ):
+):
     im = im.copy()
     if im_keypoints is None:
         assert im_bboxes is not None, "Image bboxes cannot be None."

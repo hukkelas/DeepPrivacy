@@ -27,7 +27,7 @@ def get_bounding_boxes(source_dir, dataset):
 
     with open(total_path, "r") as f:
         lines = list(f.readlines())
-    idx = 0 #lines
+    idx = 0  # lines
     bounding_boxes = {
 
     }
@@ -53,7 +53,7 @@ def get_bounding_boxes(source_dir, dataset):
                 invalid_image = True
             x1 = x0 + w
             y1 = y0 + h
-            if  w != 0 and h != 0:
+            if w != 0 and h != 0:
                 bounding_boxes[filepath].append([x0, y0, x1, y1])
     im_bboxes_dict = bounding_boxes
     relative_image_paths = list(im_bboxes_dict.keys())

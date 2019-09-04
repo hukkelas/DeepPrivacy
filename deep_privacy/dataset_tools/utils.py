@@ -3,7 +3,7 @@ import json
 
 
 def quadratic_bounding_box(x0, y0, width, height, imshape):
-    # We assume that we can create a image that is quadratic without 
+    # We assume that we can create a image that is quadratic without
     # minimizing any of the sides
     assert width <= min(imshape[:2])
     assert height <= min(imshape[:2])
@@ -60,7 +60,8 @@ def expand_bounding_box(bbox, percentage, imshape):
     x0, y0, x1, y1 = bbox
     width = x1 - x0
     height = y1 - y0
-    x0, y0, width, height = quadratic_bounding_box(x0, y0, width, height, imshape)
+    x0, y0, width, height = quadratic_bounding_box(
+        x0, y0, width, height, imshape)
     expanding_factor = int(max(height, width) * percentage)
 
     possible_max_expansion = [(imshape[0] - width)//2,
@@ -83,7 +84,6 @@ def expand_bounding_box(bbox, percentage, imshape):
         if height + y0 > imshape[0]:
             y0 -= (height + y0 - imshape[0])
 
-        
         # Expand width
         x0 = x0 - expanding_factor
         x0 = max(0, x0)
@@ -106,7 +106,7 @@ def expand_bounding_box(bbox, percentage, imshape):
     assert width <= imshape[1], "Height is larger than image."
     # Check that original bbox is within new
     x0_o, y0_o, x1_o, y1_o = orig_bbox
-    assert x0 <= x0_o, "New bbox is outisde of original. O:{}, N: {}".format(x0_o, x0 )
+    assert x0 <= x0_o, "New bbox is outisde of original. O:{}, N: {}".format(x0_o, x0)
     assert x1 >= x1_o, "New bbox is outisde of original. O:{}, N: {}".format(x1_o, x1)
     assert y0 <= y0_o, "New bbox is outisde of original. O:{}, N: {}".format(y0_o, y0)
     assert y1 >= y1_o, "New bbox is outisde of original. O:{}, N: {}".format(y1_o, y1)
@@ -129,7 +129,7 @@ def write_json(obj, path):
 
 
 def is_keypoint_within_bbox(x0, y0, x1, y1, keypoint):
-    keypoint = keypoint[:, :3] # only nose + eyes are relevant
+    keypoint = keypoint[:, :3]  # only nose + eyes are relevant
     kp_X = keypoint[0, :]
     kp_Y = keypoint[1, :]
     within_X = np.all(kp_X >= x0) and np.all(kp_X <= x1)
@@ -165,10 +165,12 @@ def pad_image(im, bbox):
         y1 += abs(y0)
         y0 = 0
     if x1 >= im.shape[1]:
-        pad_im = np.zeros((im.shape[0], x1 - im.shape[1] + 1, im.shape[2]), dtype=np.uint8)
+        pad_im = np.zeros(
+            (im.shape[0], x1 - im.shape[1] + 1, im.shape[2]), dtype=np.uint8)
         im = np.concatenate((im, pad_im), axis=1)
     if y1 >= im.shape[0]:
-        pad_im = np.zeros((y1 - im.shape[0] + 1, im.shape[1], im.shape[2]), dtype=np.uint8)
+        pad_im = np.zeros(
+            (y1 - im.shape[0] + 1, im.shape[1], im.shape[2]), dtype=np.uint8)
         im = np.concatenate((im, pad_im), axis=0)
     return im[y0:y1, x0:x1]
 
@@ -178,7 +180,6 @@ def cut_face(im, bbox, simple_expand):
         return pad_image(im, bbox)
     x0, y0, x1, y1 = bbox
     return im[y0:y1, x0:x1]
-
 
 
 def expand_bbox(bbox, imshape, simple_expand, default_to_simple=False, expansion_factor1=0.35):
