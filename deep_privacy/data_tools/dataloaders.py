@@ -100,7 +100,6 @@ def load_images(dirpath, load_fraction):
         for job in tqdm.tqdm(jobs, desc="Reading images"):
             images.append(job.get())
 
-    print(len(images))
     return images
 
 
@@ -162,7 +161,6 @@ def _load_dataset(dirpath, imsize, batch_size, full_validation, load_fraction, p
     dataloader_train = DataPrefetcher(dataloader_train, pose_size, dataset_train)
     dataloader_val = DataPrefetcher(dataloader_val, pose_size, dataset_val)
     return dataloader_train, dataloader_val
-
 
 
 def bounding_box_data_augmentation(bounding_boxes, imsize, percentage):

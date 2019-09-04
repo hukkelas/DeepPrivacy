@@ -1,13 +1,10 @@
 import os
 import time
-
-import apex
 import numpy as np
 import torch
-import torchvision
 import tqdm
 from apex import amp
-from deep_privacy import config_parser, logger, utils
+from deep_privacy import config_parser, logger, utils, torch_utils
 from deep_privacy.data_tools.data_utils import denormalize_img
 from deep_privacy.data_tools.dataloaders import load_dataset
 from deep_privacy.metrics import fid
@@ -16,7 +13,7 @@ from deep_privacy.models.generator import Generator
 from deep_privacy.models.unet_model import init_model
 from deep_privacy.torch_utils import to_cuda
 from deep_privacy.utils import (amp_state_has_overflow, load_checkpoint,
-                       save_checkpoint, wrap_models)
+                                save_checkpoint, wrap_models)
 
 torch.manual_seed(0)
 np.random.seed(0)
@@ -26,6 +23,7 @@ if False:
     torch.set_printoptions(precision=10)
 else:
     torch.backends.cudnn.benchmark = True
+
 
 class Trainer:
 
@@ -69,16 +67,12 @@ class Trainer:
         if not self.load_checkpoint():
             self.extend_models()
             self.init_optimizers()
-        
-        
+
 
         self.batch_size = self.batch_size_schedule[self.current_imsize]
         self.update_running_average_beta()
         self.logger.log_variable("stats/batch_size", self.batch_size)
 
-
-        
-      
         self.num_ims_per_log = config.logging.num_ims_per_log
         self.next_log_point = self.global_step
         self.num_ims_per_save_image = config.logging.num_ims_per_save_image
@@ -90,7 +84,7 @@ class Trainer:
             self.dataset, self.batch_size, self.current_imsize, self.full_validation, self.pose_size, self.load_fraction_of_dataset)
         self.static_z = to_cuda(torch.randn((8, 32, 4, 4)))
         self.num_skipped_steps = 0
-        
+
     def save_transition_checkpoint(self):
         filedir = os.path.join(os.path.dirname(self.config_path), "transition_checkpoints")
         os.makedirs(filedir, exist_ok=True)
@@ -133,12 +127,12 @@ class Trainer:
             self.transition_step = ckpt["transition_step"]
             self.current_imsize = ckpt["current_imsize"]
             self.latest_switch = ckpt["latest_switch"]
-            
+
             # Tracking stats
             self.global_step = ckpt["global_step"]
             self.start_time = time.time() - ckpt["total_time"] * 60
             self.num_skipped_steps = ckpt["num_skipped_steps"] if "num_skipped_steps" in ckpt.keys() else 0
-            
+
             # Models
             self.discriminator.load_state_dict(ckpt['D'])
 
@@ -165,18 +159,16 @@ class Trainer:
         to_cuda(self.running_average_generator)
         self.running_average_generator = amp.initialize(self.running_average_generator,
                                                         None, opt_level=self.opt_level)
-        
 
     def extend_running_average_generator(self):
         g = self.running_average_generator
         g.extend()
-        
+
         for avg_param, cur_param in zip(g.new_parameters(), self.generator.new_parameters()):
             assert avg_param.data.shape == cur_param.data.shape, "AVG param: {}, cur_param: {}".format(avg_param.shape, cur_param.shape)
             avg_param.data = cur_param.data
         to_cuda(g)
         self.running_average_generator = amp.initialize(self.running_average_generator, None, opt_level=self.opt_level)
-        
 
     def extend_models(self):
         self.discriminator.extend()
@@ -193,7 +185,7 @@ class Trainer:
         for avg_parameter, current_parameter in zip(
                 self.running_average_generator.parameters(),
                 self.generator.parameters()):
-            
+
             avg_parameter.data = self.rae_beta*avg_parameter + \
                 ((1-self.rae_beta) * current_parameter.float())
 
@@ -231,7 +223,7 @@ class Trainer:
         fake_data = denormalize_img(fake_data.detach())
         real_data = denormalize_img(real_data)
         condition = denormalize_img(condition)
-        
+
         to_save = torch.cat((real_data, condition, fake_data))
         tag = "before" if before else "after"
         torch.save(to_save, f".debug/{tag}.torch")
@@ -254,7 +246,6 @@ class Trainer:
             diff_fake = (d_out_fake - self.d_out_fake_before).abs().sum()
             self.logger.log_variable("transition/discriminator_diff_real", diff_real)
             self.logger.log_variable("transition/discriminator_diff_fake", diff_fake)
-
 
     def validate_model(self):
         real_scores = []
@@ -286,20 +277,18 @@ class Trainer:
                 wasserstein_distances.append(wasserstein_distance.mean().detach().item())
                 epsilon_penalties.append(epsilon_penalty.mean().detach().item())
 
-                fake_data = denormalize_img(fake_data.detach())
-                real_data = denormalize_img(real_data)
-
                 start_idx = idx*self.batch_size
                 end_idx = (idx+1)*self.batch_size
                 real_images[start_idx:end_idx] = real_data.cpu().float()
                 fake_images[start_idx:end_idx] = fake_data.cpu().float()
                 del real_data, fake_data, real_score, fake_score, wasserstein_distance, epsilon_penalty
-        to_nhwc = lambda x: np.stack((x[:,0], x[:, 1], x[:, 2]), axis=3)
+        real_images = torch_utils.image_to_numpy(real_images, to_uint8=False,
+                                                 denormalize=True)
+        fake_images = torch_utils.image_to_numpy(fake_images, to_uint8=False, 
+                                                 denormalize=True)
         fid_name = "{}_{}_{}".format(self.dataset, self.full_validation, self.current_imsize)
-        real_images = to_nhwc(real_images)
-        fake_images2 = to_nhwc(fake_images)
         if self.current_imsize >= 64:
-            fid_val = fid.calculate_fid(real_images, fake_images2, False, 8, fid_name)
+            fid_val = fid.calculate_fid(real_images, fake_images, False, 8, fid_name)
             self.logger.log_variable("stats/fid", np.mean(fid_val), True)
         self.logger.log_variable('discriminator/wasserstein-distance',
                           np.mean(wasserstein_distances), True)
@@ -453,6 +442,7 @@ class Trainer:
                         self.latest_switch
                     )
                     self.dataloader_train.update_next_transition_variable(next_transition_value)
+
 
 if __name__ == '__main__':
     config = config_parser.initialize_and_validate_config()

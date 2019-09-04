@@ -3,8 +3,8 @@ from .dataloaders import load_dataset
 from ..visualization import utils as vis_utils
 from .. import torch_utils
 import matplotlib.pyplot as plt
-from . import data_utils
 from deep_privacy.inference import infer
+
 
 def keypoint1d_to_2d(keypoints):
   assert len(keypoints.shape) == 1
@@ -12,6 +12,7 @@ def keypoint1d_to_2d(keypoints):
   y = keypoints[range(1, len(keypoints), 2)]
   kp = torch.stack((x,y), dim=1)
   return kp
+
 
 dl_train, dl_val = load_dataset("fdf", 
                                 batch_size=128,

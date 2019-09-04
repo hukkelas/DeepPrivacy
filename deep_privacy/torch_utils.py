@@ -20,6 +20,7 @@ def image_to_numpy(images, to_uint8=False, denormalize=False):
         return images[0]
     return images
 
+
 def image_to_torch(image, cuda=True, normalize_img=False):
     if image.dtype == np.uint8:
         image = image.astype(np.float32)
@@ -36,6 +37,7 @@ def image_to_torch(image, cuda=True, normalize_img=False):
         image = image * 2 - 1
     return image
 
+
 def to_cuda(elements):
     if torch.cuda.is_available():
         if type(elements) == tuple or type(elements) == list:
@@ -48,6 +50,7 @@ def isinf(tensor):
     if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor", str(tensor))
     return (tensor.abs() == math.inf).any()
+
 
 def isnan(tensor):
     r"""Returns a new tensor with boolean elements representing if each element
@@ -74,5 +77,5 @@ def finiteCheck(parameters):
         if isinf(p.grad.data):
             return False
         if isnan(p.grad.data):
-            return True
+            return False
     return True

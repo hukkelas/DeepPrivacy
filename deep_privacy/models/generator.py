@@ -4,6 +4,7 @@ from deep_privacy.models.custom_layers import PixelwiseNormalization, WSConv2d, 
 from deep_privacy.models.utils import generate_pose_channel_images, get_transition_value
 from deep_privacy.models.base_model import ProgressiveBaseModel
 
+
 def conv_bn_relu(in_dim, out_dim, kernel_size, padding=0):
     return nn.Sequential(
         WSConv2d(in_dim, out_dim, kernel_size, padding),
@@ -37,6 +38,7 @@ class UnetUpsamplingBlock(nn.Module):
         x = self.model(x)
         return x
 
+
 class Generator(ProgressiveBaseModel):
 
     def __init__(self,
@@ -45,7 +47,6 @@ class Generator(ProgressiveBaseModel):
                  image_channels):
         super().__init__(pose_size, start_channel_dim, image_channels)
         # Transition blockss
-        self.orig_start_channel_dim  = start_channel_dim
         self.to_rgb_new = WSConv2d(start_channel_dim, self.image_channels, 1, 0)
         self.to_rgb_old = WSConv2d(start_channel_dim, self.image_channels, 1, 0)
 

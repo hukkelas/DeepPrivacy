@@ -3,12 +3,6 @@ from apex import amp
 from deep_privacy import torch_utils
 
 
-def check_overflow(grad):
-    cpu_sum = float(grad.float().sum())
-    if cpu_sum == float("inf") or cpu_sum == -float("inf") or cpu_sum != cpu_sum:
-        return True
-    return False
-
 @amp.float_function
 def gradient_penalty(real_data, fake_data, discriminator, condition, landmarks, loss_scaler):
     epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() - 1)
@@ -41,11 +35,10 @@ class WGANLoss:
         else:
             self.wgan_gp_scaler = amp.scaler.LossScaler(2**14)
 
-    
     def update_optimizers(self, d_optimizer, g_optimizer):
         self.d_optimizer = d_optimizer
         self.g_optimizer = g_optimizer
-    
+
     def compute_gradient_penalty(self, real_data, fake_data, condition, landmarks):
         epsilon_shape = [real_data.shape[0]] + [1]*(real_data.dim() - 1)
         epsilon = torch.rand(epsilon_shape)
@@ -67,8 +60,7 @@ class WGANLoss:
         with amp.scale_loss(to_backward, self.d_optimizer, loss_id=1) as scaled_loss:
             scaled_loss.backward(retain_graph=True)
         return gradient_pen.detach().mean()
-        
-        
+
     def step(self, real_data, condition, landmarks):
         with torch.no_grad():
             fake_data = self.generator(condition, landmarks)
@@ -79,7 +71,7 @@ class WGANLoss:
             fake_data.detach(), condition, landmarks)
         # Wasserstein-1 Distance
         wasserstein_distance = (real_scores - fake_scores).squeeze()
-        
+
         # Epsilon penalty
         epsilon_penalty = (real_scores ** 2).squeeze()
 
@@ -104,7 +96,7 @@ class WGANLoss:
             fake_data, condition, landmarks)
         G_loss = (-fake_scores).sum()
 
-        
+
         self.g_optimizer.zero_grad()
         with amp.scale_loss(G_loss, self.g_optimizer, loss_id=3) as scaled_loss:
             scaled_loss.backward()
@@ -115,9 +107,3 @@ class WGANLoss:
             return None
 
         return wasserstein_distance.mean().detach(), gradient_pen.mean().detach(), real_scores.mean().detach(), fake_scores.mean().detach(), epsilon_penalty.mean().detach()
-        
-
-    
-
-
-

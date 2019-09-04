@@ -1,6 +1,6 @@
 import torch
-from deep_privacy import utils
 from deep_privacy.models.utils import get_transition_value
+
 
 class DataPrefetcher():
 
@@ -24,7 +24,7 @@ class DataPrefetcher():
             self.next_image = self.next_image.cuda(non_blocking=True).float()
             self.next_condition = self.next_condition.cuda(non_blocking=True).float()
             self.next_landmark = self.next_landmark.cuda(non_blocking=True)
-            
+
             self.next_image = interpolate_image(self.pool,
                                                 self.next_image,
                                                 self.transition_variable)
@@ -36,8 +36,6 @@ class DataPrefetcher():
 
             self.next_condition = self.next_condition / 255
             self.next_condition = self.next_condition*2 - 1
-            
-            
 
     def __len__(self):
         return len(self.original_loader)
@@ -51,13 +49,12 @@ class DataPrefetcher():
         next_landmark = self.next_landmark
         self.preload()
         return next_image, next_condition, next_landmark[:, :self.pose_size]
-    
 
     def __iter__(self):
         self.loader = iter(self.original_loader)
         self.preload()
         return self
-    
+
     def update_next_transition_variable(self, transition_variable):
         self.transition_variable = transition_variable
         self.dataset.transition_variable = self.transition_variable
@@ -69,6 +66,7 @@ def interpolate_image(pool, images, transition_variable):
     y = torch.nn.functional.interpolate(y, scale_factor=2)
     images = get_transition_value(y, images, transition_variable)
     return images
+
 
 def denormalize_img(image):
     image = (image+1)/2

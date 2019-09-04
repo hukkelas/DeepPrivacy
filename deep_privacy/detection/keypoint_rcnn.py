@@ -13,7 +13,7 @@ def detect_keypoints(img, keypoint_threshold=.3):
     img = image_to_torch(img, cuda=True)[0]
     with torch.no_grad():
         outputs = model([img])
-    
+
     # Shape: [N persons, K keypoints, (x,y,visibility)]
     keypoints = outputs[0]["keypoints"]
     scores = outputs[0]["scores"]

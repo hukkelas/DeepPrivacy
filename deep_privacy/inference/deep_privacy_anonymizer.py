@@ -72,7 +72,7 @@ class DeepPrivacyAnonymizer(Anonymizer):
         if len(face_info) == 0:
             return face_info
         return face_info
-    
+
     def anonymize_faces(self, face_info):
         torch_faces = torch.empty((len(face_info), 3, self.inference_imsize, self.inference_imsize),
                                   dtype=torch.float32)
@@ -81,7 +81,7 @@ class DeepPrivacyAnonymizer(Anonymizer):
         for face_idx, face in face_info.items():
             torch_faces[face_idx] = face["torch_input"]
             torch_keypoints[face_idx] = face["translated_keypoint"]
-        
+
         num_batches = int(np.ceil(len(face_info) / self.batch_size))
         results = []
         with torch.no_grad():
@@ -102,14 +102,14 @@ class DeepPrivacyAnonymizer(Anonymizer):
 
         generated_faces = torch.cat(results)
         return generated_faces
-    
+
     def post_process(self, face_info, generated_faces, images):
         anonymized_images = [im.copy() for im in images]
         im_to_face_idx = defaultdict(list)
         for face_idx, info in face_info.items():
             im_idx = info["im_idx"]
             im_to_face_idx[im_idx].append(face_idx)
-        
+
         for im_idx, face_indices in tqdm.tqdm(im_to_face_idx.items(), desc="Post-processing"):
             im = anonymized_images[im_idx]
             replaced_mask = np.ones_like(im).astype("bool")
@@ -121,5 +121,3 @@ class DeepPrivacyAnonymizer(Anonymizer):
                                         original_bbox, replaced_mask)
             anonymized_images[im_idx] = im
         return anonymized_images
-
-

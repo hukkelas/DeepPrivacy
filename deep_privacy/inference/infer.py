@@ -8,7 +8,6 @@ from deep_privacy.dataset_tools import utils as dataset_utils
 from deep_privacy.data_tools.dataloaders import cut_bounding_box
 from deep_privacy.data_tools.data_utils import denormalize_img
 import deep_privacy.torch_utils as torch_utils
-from deep_privacy.visualization import utils as vis_utils
 
 
 def init_generator(config, ckpt):
@@ -56,7 +55,6 @@ def shift_bbox(orig_bbox, expanded_bbox, new_imsize):
     y0, y1 = y0 - y0e, y1 - y0e
     w_ = x1e - x0e
     x0, y0, x1, y1 = [int(k*new_imsize/w_) for k in [x0, y0, x1, y1]]
-    bbox = np.array([x0, y0, x1, y1]).astype(int)
     return [x0, y0, x1, y1]
 
 
@@ -79,29 +77,8 @@ def shift_and_scale_keypoint(keypoint, expanded_bbox):
     return keypoint
 
 
-def save_debug_image(original_image, input_image, generated, keypoints, bbox, expanded_bbox):
-    x0e, y0e, x1e, y1e = expanded_bbox
-    original_image = original_image[y0e:y1e, x0e:x1e]
-    original_image = cv2.resize(original_image, (input_image.shape[0], input_image.shape[0]))
-
-    bbox = np.array(bbox)
-    imname = os.path.basename(filepath).split(".")[0]
-
-    debug_path = os.path.join(save_path, "debug")
-
-    os.makedirs(debug_path, exist_ok=True)
-    debug_path = os.path.join(debug_path, f"{imname}_{face_idx}.jpg")
-    x = keypoints[0, range(0, len(keypoints[0]), 2)]
-    y = keypoints[0, range(1, len(keypoints[0]), 2)]
-    keypoints = (torch.stack((x, y), dim=1) * original_image.shape[0])[None, :]
-    original_image = vis_utils.draw_faces_with_keypoints(original_image,
-                                                         None,
-                                                         keypoints)
-    image = np.concatenate((original_image, input_image, generated), axis=1)
-    cv2.imwrite(debug_path, image[:, :, ::-1])
-
-
 SIMPLE_EXPAND = False
+
 
 def pre_process(im, keypoint, bbox, imsize, cuda=True):
     bbox = to_numpy(bbox)

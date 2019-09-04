@@ -8,6 +8,7 @@ import glob
 import os
 from scipy import linalg
 from deep_privacy.torch_utils import to_cuda
+from tqdm import tqdm, trange
 
 
 class PartialInceptionNetwork(nn.Module):
@@ -46,7 +47,7 @@ class PartialInceptionNetwork(nn.Module):
         activations = activations.view(x.shape[0], 2048)
         return activations
 
-from tqdm import trange
+
 def get_activations(images, batch_size):
     """
     Calculates activations for last pool layer for all iamges
@@ -175,7 +176,7 @@ def preprocess_image(im):
 
     return im
 
-from tqdm import tqdm
+
 def preprocess_images(images, use_multiprocessing):
     """Resizes and shifts the dynamic range of image to 0-1
     Args:
@@ -217,7 +218,7 @@ def calculate_fid(images1, images2, use_multiprocessing, batch_size, fid_name):
         FID (scalar)
     """
     cached_real_images_path = os.path.join("metrics", ".fid_cache", fid_name)
-    
+
     images2 = preprocess_images(images2, use_multiprocessing)
     if os.path.isfile(cached_real_images_path + "_mu1.npy"):
         mu1 = np.load(cached_real_images_path + "_mu1.npy")

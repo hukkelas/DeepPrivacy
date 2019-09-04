@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from apex import amp
 
+
 # https://github.com/nvnbny/progressive_growing_of_gans/blob/master/modelUtils.py
 class WSConv2d(nn.Module):
     """
@@ -52,6 +53,7 @@ class WSLinear(nn.Module):
     def forward(self, x):
         return self.linear(x * self.wtScale) + self.bias
 
+
 class PixelwiseNormalization(nn.Module):
 
     def __init__(self):
@@ -62,6 +64,7 @@ class PixelwiseNormalization(nn.Module):
         factor = ((x**2 ).mean(dim=1, keepdim=True) + 1e-8)**0.5
         return x / factor
 
+
 class UpSamplingBlock(nn.Module):
 
     def __init__(self):
@@ -69,6 +72,7 @@ class UpSamplingBlock(nn.Module):
 
     def forward(self, x):
         return nn.functional.interpolate(x, scale_factor=2)
+
 
 class MinibatchStdLayer(nn.Module):
 

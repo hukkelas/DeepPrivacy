@@ -36,7 +36,6 @@ class Discriminator(ProgressiveBaseModel):
                  start_channel_dim,
                  pose_size
                  ):
-        self.orig_start_channel_dim = start_channel_dim
         start_channel_dim = int(start_channel_dim*(2**0.5))
         start_channel_dim = start_channel_dim // 8 * 8
         super().__init__(pose_size, start_channel_dim, image_channels)
@@ -108,7 +107,6 @@ class DeepDiscriminator(ProgressiveBaseModel):
                  start_channel_dim,
                  pose_size
                  ):
-        #start_channel_dim = int(start_channel_dim*(2**0.5))
         super().__init__(pose_size, start_channel_dim, image_channels)
         
         self.from_rgb_new = conv_module_bn(image_channels*2, start_channel_dim, 1, 0)
