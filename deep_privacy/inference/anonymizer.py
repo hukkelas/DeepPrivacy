@@ -64,7 +64,8 @@ class Anonymizer:
                         end_frame=None,
                         with_keypoints=False,
                         anonymize_source=False,
-                        max_face_size=1.0):
+                        max_face_size=1.0,
+                        without_source=True):
         # Read original video
         original_video = mp.VideoFileClip(video_path)
         fps = original_video.fps
@@ -109,7 +110,9 @@ class Anonymizer:
                 orig_frame, im_bboxes[frame_idx], im_keypoints[frame_idx],
                 radius=None,
                 black_out_face=anonymize_source)
-            return np.concatenate((orig_frame, anonymized_frame), axis=1)
+            if without_source:
+                return np.concatenate((orig_frame, anonymized_frame), axis=1)
+            return anonymized_frame
 
         anonymized_video = mp.VideoClip(make_frame)
         anonymized_video.duration = (end_frame - start_frame) / fps
