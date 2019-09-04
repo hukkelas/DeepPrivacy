@@ -42,7 +42,7 @@ tensorboard --logdir summaries/
 
 Run
 ```bash
-python -m src.inference.batch_infer [config_path] --source_path /path/to/source/directory --target_path /path/to/taget/directory
+python -m deep_privacy.inference.batch_infer [config_path] --source_path /path/to/source/directory --target_path /path/to/taget/directory
 ```
 By default it will look for images in the folder `test_examples`, and images will be saved to the same path as the config file.
 

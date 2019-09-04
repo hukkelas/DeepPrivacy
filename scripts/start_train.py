@@ -21,9 +21,9 @@ os.system("docker rm {}".format(docker_container))
 
 distributed_command = "" #if num_gpus <= 1 else "-m torch.distributed.launch --nproc_per_node {}".format(num_gpus)
 command = "nvidia-docker run --name {} --ipc=host\
-        -v /dev/log:/home/haakohu/DeepPrivacy/log -u 1174424 -v {}:/workspace -v /raid/userdata/haakohu/deep_privacy/data:/workspace/data \
+        -v /dev/log:/home/haakohu/DeepPrivacy/log -u 1174424 -v {}:/workspace  \
            -e CUDA_VISIBLE_DEVICES={}  --log-opt max-size=50m\
-          -it  haakohu/pytorch python -m src.train {}".format(
+          -it  haakohu/pytorch python -m deep_privacy.train {}".format(
             docker_container,
             filedir,
             gpu_id,

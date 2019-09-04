@@ -21,6 +21,4 @@ for sdir in summaries_dir:
     sdir = os.path.join(abspath, sdir)
     new_dir = os.path.join(abspath, tensorboard_path, model_name)
     os.symlink(sdir, new_dir, target_is_directory=True)
-    print(f"Creating symlink: \n\t\tsrc: {sdir}, \n\t\tdst: {new_dir}")
-
-
+    print(f"Creating symlink: \n\t\tdeep_privacy: {sdir}, \n\t\tdst: {new_dir}")
