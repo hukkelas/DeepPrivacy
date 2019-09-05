@@ -181,12 +181,12 @@ def cut_face(im, bbox, simple_expand):
 
 
 
-def expand_bbox(bbox, imshape, simple_expand, default_to_simple=False):
+def expand_bbox(bbox, imshape, simple_expand, default_to_simple=False, expansion_factor1=0.35):
     assert bbox.shape == (4,), f"BBox shape was: {bbox.shape}"
     bbox = bbox.astype(float)
     if simple_expand:
         return expand_bbox_simple(bbox, 0.4)
     try:
-        return expand_bounding_box(bbox, 0.35, imshape)
+        return expand_bounding_box(bbox, expansion_factor1, imshape)
     except AssertionError:
-        return expand_bbox_simple(bbox, 0.7)
+        return expand_bbox_simple(bbox, expansion_factor1*2)
