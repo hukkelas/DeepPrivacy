@@ -5,3 +5,8 @@ matplotlib
 pandas
 tqdm
 tflib
+autopep8
+moviepy
+tensorboard
+opencv-python
+requests

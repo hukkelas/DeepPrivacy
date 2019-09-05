@@ -37,3 +37,4 @@ inception/
 tensorboard_summaries/
 
 *.pyc
+*.csv

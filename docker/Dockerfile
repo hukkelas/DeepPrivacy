@@ -9,9 +9,6 @@ RUN pip install https://download.pytorch.org/whl/cu100/torchvision-0.3.0-cp36-cp
 COPY  requirements.txt /workspace
 
 RUN pip install -r requirements.txt
-RUN pip install requests
-RUN pip install tensorboard
-RUN pip install opencv-python
 
 RUN mkdir /pip_installs/apex
 WORKDIR /pip_installs
@@ -25,8 +22,5 @@ WORKDIR /workspace
 
 RUN mkdir /pytorch_models
 ENV TORCH_HOME=/workspace
-RUN pip install imagehash
 RUN apt-get update
 RUN apt install ffmpeg -y 
-#RUN pip install imageio-ffmpeg
-RUN pip install moviepy
