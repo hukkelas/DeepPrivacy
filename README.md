@@ -64,10 +64,10 @@ From our paper, the following config files corresponds to our models
 ### Pre-trained models
 For each config file, you can download pre-trained models from the following URLS:
 
-- [`models/default/config.yml`]()
-- [`models/no_pose/config.yml`]()
-- [`models/large/config.yml`]()
-- [`models/deep_discriminator/config.yml`]()
+- [`models/default/config.yml`](https://drive.google.com/open?id=1P_UO1ZSJzIUeVEkbmhc68XB3csvAyaB9)
+- [`models/no_pose/config.yml`](https://drive.google.com/open?id=1hYye3ZfrILPfpRp22mzjwwMsot6RV7DJ)
+- [`models/large/config.yml`](https://drive.google.com/open?id=1RXM0xIoaHARrZ87r-PFEVVOc9BjDuWc5)
+- [`models/deep_discriminator/config.yml`](https://drive.google.com/drive/folders/1DZY40wh-EpoywBsNmH7nU8iNXdt-L7O3?usp=sharing)
 
 ## Automatic inference and anonymization of images
 There are several scripts to perform inference
@@ -75,8 +75,8 @@ There are several scripts to perform inference
 Every scripts require a path to a `config.yml` file. In these examples, we use the default model with 256 channels in the generator.
 
 **Download Face Detector:** Before running inference, we expect that you have downloaded the DSFD face detection model, and place it to the path: `deep_privacy/detection/dsfd/weights/WIDERFace_DSFD_RES152.pth`.
-This can be downloaded from the [official repository for DSFD](https://github.com/TencentYoutuResearch/FaceDetection-DSFD). 
-[Google Drive Link](https://drive.google.com/file/d/1WeXlNYsM6dMP3xQQELI-4gxhwKUQxc3-/view?usp=sharing)
+This can be downloaded from the [official repository for DSFD](https://github.com/TencentYoutuResearch/FaceDetection-DSFD)
+[[Google Drive Link](https://drive.google.com/file/d/1WeXlNYsM6dMP3xQQELI-4gxhwKUQxc3-/view?usp=sharing)].
 
 ### Anonymizing a single image or folder
 
