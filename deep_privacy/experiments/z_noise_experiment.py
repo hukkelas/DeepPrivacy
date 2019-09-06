@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 if __name__ == "__main__":
     generator, _, _, _, _ = infer.read_args()
     imsize = generator.current_imsize
-    images, bounding_boxes, landmarks = load_dataset_files("data/fdf", imsize,
+    images, bounding_boxes, landmarks = load_dataset_files("data/fdf_png", imsize,
                                                            load_fraction=True)
     savedir = os.path.join(".debug", "test_examples", "z_noise_test")
     os.makedirs(savedir, exist_ok=True)
@@ -21,6 +21,7 @@ if __name__ == "__main__":
     all_ims = []
     for idx in range(-5, -1):
         orig = images[idx]
+        orig = np.array(orig)
         assert orig.dtype == np.uint8
         pose = landmarks[idx:idx+1]
         bbox = bounding_boxes[idx]
