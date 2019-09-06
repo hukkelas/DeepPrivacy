@@ -34,7 +34,7 @@ else:
 os.system("docker rm {}".format(docker_container))
 command = "nvidia-docker run --name {} --ipc=host{}\
         -v /dev/log:/home/haakohu/DeepPrivacy/log -u 1174424 -v {}:/workspace  \
-            -v /work/haakohu/deep_privacy/data/:/workspace/data/ \
+            -v /lhome/haakohu/DSFD:/lhome/haakohu/DSFD \
            -e CUDA_VISIBLE_DEVICES={}  --log-opt max-size=50m\
           -it  haakohu/pytorch  {}".format(
     docker_container,

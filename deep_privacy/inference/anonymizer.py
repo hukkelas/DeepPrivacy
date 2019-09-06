@@ -15,6 +15,8 @@ class Anonymizer:
         super().__init__()
         self.face_threshold = face_threshold
         self.keypoint_threshold = keypoint_threshold
+        print(f"Anonymizer initialized. Keypoint threshold: {keypoint_threshold}" + \
+              f"Face threshold: {face_threshold}")
 
     def anonymize_images(self, images, im_keypoints, im_bboxes):
         raise NotImplementedError
