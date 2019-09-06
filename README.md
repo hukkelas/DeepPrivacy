@@ -2,7 +2,7 @@
 ![](images/example.gif)
 
 DeepPrivacy is a fully automatic anonymization technique for images.
-This repository contains the source code for the paper *["DeepPrivacy: A Generative Adversarial Network for Face Anonymization"*](google.com), published at ISVC 2019.
+This repository contains the source code for the paper [*"DeepPrivacy: A Generative Adversarial Network for Face Anonymization"*](google.com), published at ISVC 2019.
 
 ![](images/generated_results.png)
 
@@ -58,7 +58,7 @@ From our paper, the following config files corresponds to our models
 
 - `models/default/config.yml`: Default 12M parameter model with pose (Max 256 channels in convolutions.)
 - `models/no_pose/config.yml`: Default 12M parameter model without pose
-- **BEST:** `models/large/config.yml`: Default 46M parameter model with pose (Max 512 channels in convolutions). If you have the compute power, we recommend to use this model.
+- `models/large/config.yml` (**BEST:**): Default 46M parameter model with pose (Max 512 channels in convolutions). If you have the compute power, we recommend to use this model.
 - `models/deep_discriminator/config.yml`: Default deep discriminator model.
 
 ### Pre-trained models
@@ -73,6 +73,10 @@ For each config file, you can download pre-trained models from the following URL
 There are several scripts to perform inference
 
 Every scripts require a path to a `config.yml` file. In these examples, we use the default model with 256 channels in the generator.
+
+**Download Face Detector:** Before running inference, we expect that you have downloaded the DSFD face detection model, and place it to the path: `deep_privacy/detection/dsfd/weights/WIDERFace_DSFD_RES152.pth`.
+This can be downloaded from the [official repository for DSFD](https://github.com/TencentYoutuResearch/FaceDetection-DSFD). 
+[Google Drive Link](https://drive.google.com/file/d/1WeXlNYsM6dMP3xQQELI-4gxhwKUQxc3-/view?usp=sharing)
 
 ### Anonymizing a single image or folder
 
