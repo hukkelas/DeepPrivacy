@@ -2,7 +2,8 @@
 ![](images/example.gif)
 
 DeepPrivacy is a fully automatic anonymization technique for images.
-This repository contains the source code for the paper [*"DeepPrivacy: A Generative Adversarial Network for Face Anonymization"*](google.com), accepted to ISVC 2019.
+
+This repository contains the source code for the paper [*"DeepPrivacy: A Generative Adversarial Network for Face Anonymization"*](https://arxiv.org/abs/1909.04538), published at ISVC 2019.
 
 ![](images/generated_results.png)
 
