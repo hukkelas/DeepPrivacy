@@ -15,6 +15,8 @@ DeepPrivacy detects faces with state-of-the-art detection methods.
 [Mask R-CNN](https://arxiv.org/abs/1703.06870) is used to generate a sparse pose information of the face, and [DSFD](https://arxiv.org/abs/1810.10220) is used to detect faces in the image.
 ![](images/overall_architecture.png)
 
+[Click here to test it on Google Colab!](https://drive.google.com/open?id=1mR5DcND9JCxqr1rXsavVYKzFQq4gOI5-)
+
 ## Citation
 If you find this code useful, please cite the following:
 ```
