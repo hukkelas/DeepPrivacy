@@ -20,13 +20,13 @@ DeepPrivacy detects faces with state-of-the-art detection methods.
 ## Citation
 If you find this code useful, please cite the following:
 ```
-@article{deep_privacy, 
-         title={DeepPrivacy: A Generative Adversarial Network for Face Anonymization},
-         url={https://arxiv.org/abs/1909.04538},
-         journal={arXiv.org},
-         author={Håkon Hukkelås and Rudolf Mester and Frank Lindseth},
-         year={2019}
+@article{hukkelaas2019deepprivacy,
+  title={DeepPrivacy: A Generative Adversarial Network for Face Anonymization},
+  author={Hukkel{\aa}s, H{\aa}kon and Mester, Rudolf and Lindseth, Frank},
+  journal={arXiv preprint arXiv:1909.04538},
+  year={2019}
 }
+
 ```
 ## FDF Dataset
 The FDF dataset will be released at [github:hukkelas/FDF](https://github.com/hukkelas/FDF)
