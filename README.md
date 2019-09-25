@@ -54,7 +54,7 @@ docker build -t deep_privacy .
 Then, training can be started with:
 
 ```bash
-nvidia-docker run --rm  -it -v $PWD:/app  -e CUDA_VISIBLE_DEVICES=1 deep_privacy python -m deep_privacy.train models/default/config.yml
+nvidia-docker run --rm  -it -v $PWD:/workspace  -e CUDA_VISIBLE_DEVICES=0 deep_privacy python -m deep_privacy.train models/large/config.yml
 ```
 
 ## Config files
