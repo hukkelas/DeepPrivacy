@@ -2,6 +2,8 @@ import setuptools
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
+with open("docker/requirements.txt") as fh:
+    requirements = fh.read()
 
 setuptools.setup(
     name="deep_privacy",
@@ -19,4 +21,5 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.6',
+    install_requires=requirements.split()
 )
