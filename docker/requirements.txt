@@ -10,3 +10,4 @@ moviepy
 tensorboard
 opencv-python
 requests
+pyyaml
