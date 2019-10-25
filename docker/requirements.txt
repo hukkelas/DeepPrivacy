@@ -10,3 +10,5 @@ moviepy
 tensorboard
 opencv-python
 requests
+pyyaml
+git+https://github.com/NVIDIA/apex
