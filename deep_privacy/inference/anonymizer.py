@@ -102,7 +102,7 @@ class Anonymizer:
             im_bboxes = detection_api.batch_detect_faces(frames,
                                                          self.face_threshold)
             im_keypoints = None
-            anonymized_frames = self.anonymize_images(frames, im_bboxes)
+            anonymized_frames = self.anonymize_images(frames, im_bboxes=im_bboxes)
 
         def make_frame(t):
             frame_idx = int(round(t * original_video.fps))
