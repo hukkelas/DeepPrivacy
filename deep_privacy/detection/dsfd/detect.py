@@ -4,6 +4,7 @@ import cv2
 from .face_ssd import build_ssd
 from .config import resnet152_model_config
 from . import torch_utils
+import os.path
 
 
 class DSFDDetector:
@@ -22,6 +23,8 @@ class DSFDDetector:
         net = build_ssd(cfg)  # initialize SSD
 
         weight_path = self.weight_path
+        assert os.path.exists(weight_path), "Weights not found: '" + \
+            weight_path + "'. Consider Downloading from https://drive.google.com/file/d/1WeXlNYsM6dMP3xQQELI-4gxhwKUQxc3-"
         net.load_state_dict(torch.load(weight_path,
                                        map_location=torch_utils.get_device()))
         torch_utils.to_cuda(net)
