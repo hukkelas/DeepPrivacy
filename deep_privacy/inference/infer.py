@@ -98,22 +98,32 @@ def pre_process(im, keypoint, bbox, imsize, cuda=True):
     return torch_input, keypoint, expanded_bbox, new_bbox
 
 
-def stitch_face(im, expanded_bbox, generated_face, bbox_to_extract, image_mask, original_bbox):
+def stitch_face(im, expanded_bbox, generated_face, bbox_to_extract, image_mask, original_bbox, tight_stitch=False):
     # Ugly but works....
+    # if tight_stitch is set to true, only the part of the image inside original_bbox is updated
     x0e, y0e, x1e, y1e = expanded_bbox
     x0o, y0o, x1o, y1o = bbox_to_extract
+    x0, y0, x1, y1 = original_bbox
 
-    mask_single_face = image_mask[y0e:y1e, x0e:x1e]
+    if tight_stitch:
+        original_bbox_mask =  np.zeros_like(image_mask, dtype=bool)
+        original_bbox_mask[y0:y1, x0:x1, :] = 1
+        original_bbox_mask = original_bbox_mask * image_mask # logical and on masks
+        mask_single_face = original_bbox_mask[y0e:y1e, x0e:x1e]
+
+    else:
+        mask_single_face = image_mask[y0e:y1e, x0e:x1e]
+
     to_replace = im[y0e:y1e, x0e:x1e]
     generated_face = generated_face[y0o:y1o, x0o:x1o]
     to_replace[mask_single_face] = generated_face[mask_single_face]
     im[y0e:y1e, x0e:x1e] = to_replace
-    x0, y0, x1, y1 = original_bbox
     image_mask[y0:y1, x0:x1, :] = 0
     return im
 
 
-def replace_face(im, generated_face, image_mask, original_bbox, expanded_bbox):
+def replace_face(im, generated_face, image_mask, original_bbox, expanded_bbox,
+                 replace_tight_bbox=False):
     original_bbox = to_numpy(original_bbox)
     assert expanded_bbox[2] - expanded_bbox[0] == generated_face.shape[1], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
     assert expanded_bbox[3] - expanded_bbox[1] == generated_face.shape[0], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
@@ -134,18 +144,21 @@ def replace_face(im, generated_face, image_mask, original_bbox, expanded_bbox):
         expanded_bbox[3] = im.shape[0]
 
     im = stitch_face(im, expanded_bbox, generated_face,
-                     bbox_to_extract, image_mask, original_bbox)
+                     bbox_to_extract, image_mask, original_bbox,
+                     tight_stitch=replace_tight_bbox)
     return im
 
 
-def post_process(im, generated_face, expanded_bbox, original_bbox, image_mask):
+def post_process(im, generated_face, expanded_bbox, original_bbox, image_mask,
+                 replace_tight_bbox=False):
     generated_face = denormalize_img(generated_face)
     generated_face = torch_utils.image_to_numpy(
         generated_face[0], to_uint8=True)
     orig_imsize = expanded_bbox[2] - expanded_bbox[0]
     generated_face = cv2.resize(generated_face, (orig_imsize, orig_imsize))
     im = replace_face(im, generated_face, image_mask,
-                      original_bbox, expanded_bbox)
+                      original_bbox, expanded_bbox,
+                      replace_tight_bbox=replace_tight_bbox)
     return im
 
 

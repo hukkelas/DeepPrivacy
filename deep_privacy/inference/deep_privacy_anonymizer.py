@@ -11,13 +11,14 @@ from . import infer
 
 class DeepPrivacyAnonymizer(Anonymizer):
 
-    def __init__(self, generator, batch_size, use_static_z, save_debug=True, **kwargs):
+    def __init__(self, generator, batch_size, use_static_z, save_debug=True, replace_tight_bbox=False, **kwargs):
         super().__init__(**kwargs)
         self.inference_imsize = generator.current_imsize
         self.batch_size = batch_size
         self.pose_size = generator.num_poses * 2
         self.generator = generator
         self.use_static_z = use_static_z
+        self.replace_tight_bbox = replace_tight_bbox
         if self.use_static_z:
             self.static_z = self.generator.generate_latent_variable(
                 self.batch_size, "cuda", torch.float32).zero_()
@@ -122,6 +123,15 @@ class DeepPrivacyAnonymizer(Anonymizer):
                 expanded_bbox = face_info[face_idx]["expanded_bbox"]
                 original_bbox = face_info[face_idx]["face_bbox"]
                 im = infer.post_process(im, generated_face, expanded_bbox,
-                                        original_bbox, replaced_mask)
+                                        original_bbox, replaced_mask,
+                                        replace_tight_bbox=self.replace_tight_bbox)
+
+                if self.save_debug:
+                    filepath = os.path.join(self.debug_directory,
+                                            f"mask_{im_idx}_{face_idx}.jpg")
+                    cv2.imwrite(filepath, np.array(replaced_mask, dtype=np.uint8) * 255)
+
             anonymized_images[im_idx] = im
+
+
         return anonymized_images
