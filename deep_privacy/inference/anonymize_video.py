@@ -10,7 +10,8 @@ if __name__ == "__main__":
     a = deep_privacy_anonymizer.DeepPrivacyAnonymizer(generator, 32,
                                                       use_static_z=True,
                                                       keypoint_threshold=.1,
-                                                      face_threshold=.6)
+                                                      face_threshold=.6,
+                                                      replace_tight_bbox=True)
 
     a.anonymize_video(source_path,
                       target_path,
