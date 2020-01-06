@@ -108,7 +108,7 @@ def stitch_face(im, expanded_bbox, generated_face, bbox_to_extract, image_mask, 
     if tight_stitch:
         original_bbox_mask =  np.zeros_like(image_mask, dtype=bool)
         original_bbox_mask[y0:y1, x0:x1, :] = 1
-        original_bbox_mask = original_bbox_mask * image_mask # logical and on masks
+        original_bbox_mask = np.logical_and(original_bbox_mask, image_mask)
         mask_single_face = original_bbox_mask[y0e:y1e, x0e:x1e]
 
     else:
