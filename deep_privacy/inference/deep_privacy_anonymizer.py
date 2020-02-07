@@ -105,7 +105,7 @@ class DeepPrivacyAnonymizer(Anonymizer):
                     generated_faces = self.generator(im, keypoints)
                 results.append(generated_faces.cpu())
 
-        generated_faces = torch.cat(results)
+        generated_faces = torch.cat(results) if len(results) else torch.tensor([])
         return generated_faces
 
     def post_process(self, face_info, generated_faces, images):
