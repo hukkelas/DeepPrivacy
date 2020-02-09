@@ -304,14 +304,14 @@ class Trainer:
                 del real_data, fake_data, real_score, fake_score, wasserstein_distance, epsilon_penalty
         real_images = torch_utils.image_to_numpy(real_images, to_uint8=False,
                                                  denormalize=True)
-        fake_images = torch_utils.image_to_numpy(fake_images, to_uint8=False,
+        fake_images_numpy = torch_utils.image_to_numpy(fake_images, to_uint8=False,
                                                  denormalize=True)
         fid_name = "{}_{}_{}".format(self.dataset,
                                      self.full_validation,
                                      self.current_imsize)
         if self.current_imsize >= 64:
             fid_val = fid.calculate_fid(real_images,
-                                        fake_images, 
+                                        fake_images_numpy, 
                                         False, 8, fid_name)
             self.logger.log_variable("stats/fid", np.mean(fid_val), True)
         self.logger.log_variable('discriminator/wasserstein-distance',
