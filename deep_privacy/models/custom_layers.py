@@ -7,7 +7,7 @@ from apex import amp
 # https://github.com/nvnbny/progressive_growing_of_gans/blob/master/modelUtils.py
 class WSConv2d(nn.Module):
     """
-    This is the wt scaling conv layer layer. Initialize with N(0, scale). Then 
+    This is the wt scaling conv layer. Initialize with N(0, scale). Then 
     it will multiply the scale for every forward pass
     """
 
