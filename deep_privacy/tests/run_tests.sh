@@ -1,8 +1,0 @@
-cuda_device=8
-cuda_multi_gpu=8,9
-#nvidia-docker run --rm -it -v $PWD:/workspace  -u 1174424 -v /raid/userdata/haakohu/deep_privacy/data:/workspace/data -e CUDA_VISIBLE_DEVICES=$cuda_device haakohu/pytorch_beta  python tests/distributed_test.py --overwrite_results
-#nvidia-docker run --rm -it -v $PWD:/workspace  -u 1174424 -v /raid/userdata/haakohu/deep_privacy/data:/workspace/data -e CUDA_VISIBLE_DEVICES=$cuda_multi_gpu haakohu/pytorch_beta  python -m torch.distributed.launch --nproc_per_node 2 tests/distributed_test.py
-nvidia-docker run --rm -it -v $PWD:/workspace  -u 1174424 -v /raid/userdata/haakohu/deep_privacy/data:/workspace/data -e CUDA_VISIBLE_DEVICES=$cuda_device haakohu/pytorch0.4.1  python tests/data_parallel_test.py --overwrite_results
-nvidia-docker run --rm -it -v $PWD:/workspace  -u 1174424 -v /raid/userdata/haakohu/deep_privacy/data:/workspace/data -e CUDA_VISIBLE_DEVICES=$cuda_multi_gpu haakohu/pytorch0.4.1  python tests/data_parallel_test.py
-nvidia-docker run --rm -it -v $PWD:/workspace  -u 1174424 -v /raid/userdata/haakohu/deep_privacy/data:/workspace/data -e CUDA_VISIBLE_DEVICES=$cuda_device haakohu/pytorch_beta  python tests/data_parallel_test.py --overwrite_results
-nvidia-docker run --rm -it -v $PWD:/workspace  -u 1174424 -v /raid/userdata/haakohu/deep_privacy/data:/workspace/data -e CUDA_VISIBLE_DEVICES=$cuda_multi_gpu haakohu/pytorch_beta  python tests/data_parallel_test.py

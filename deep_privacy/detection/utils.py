@@ -17,14 +17,18 @@ def match_bbox_keypoint(bounding_boxes, keypoints):
     """
     if len(bounding_boxes) == 0 or len(keypoints) == 0:
         return np.empty((0, 5)), np.empty((0, 7, 2))
-    assert bounding_boxes.shape[1] == 4, "Shape was : {}".format(bounding_boxes.shape)
-    assert keypoints.shape[1:] == (7, 2), "Keypoint shape was: {}".format(keypoints.shape)
+    assert bounding_boxes.shape[1] == 4,\
+        f"Shape was : {bounding_boxes.shape}"
+    assert keypoints.shape[-1] == 2,\
+        f"Expected (x,y) in last axis, got: {keypoints.shape}"
+    assert keypoints.shape[1] in (5, 7),\
+        f"Expeted 5 or 7 keypoints. Keypoint shape was: {keypoints.shape}"
 
     matches = []
     for bbox_idx, bbox in enumerate(bounding_boxes):
         keypoint = None
         for kp_idx, keypoint in enumerate(keypoints):
-            if kp_idx in [x[1] for x in matches]:
+            if kp_idx in (x[1] for x in matches):
                 continue
             if is_keypoint_within_bbox(*bbox, keypoint):
                 matches.append((bbox_idx, kp_idx))

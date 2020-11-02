@@ -1,137 +1,115 @@
 import numpy as np
 import torch
 import deep_privacy.torch_utils as torch_utils
-import tqdm
-import os
 import cv2
+import pathlib
+import typing
+from deep_privacy.detection.detection_api import ImageAnnotation
 from .anonymizer import Anonymizer
-from collections import defaultdict
 from . import infer
+
+
+def batched_iterator(batch, batch_size):
+    k = list(batch.keys())[0]
+    num_samples = len(batch[k])
+    num_batches = int(np.ceil(num_samples / batch_size))
+    for idx in range(num_batches):
+        start = batch_size * idx
+        end = start + batch_size
+        yield {
+            key: torch_utils.to_cuda(arr[start:end])
+            for key, arr in batch.items()
+        }
 
 
 class DeepPrivacyAnonymizer(Anonymizer):
 
-    def __init__(self, generator, batch_size, use_static_z, save_debug=True, replace_tight_bbox=False, **kwargs):
+    def __init__(self, generator, batch_size, save_debug,
+                 fp16_inference: bool,
+                 truncation_level=5, **kwargs):
         super().__init__(**kwargs)
-        self.inference_imsize = generator.current_imsize
+        self.inference_imsize = self.cfg.models.max_imsize
         self.batch_size = batch_size
-        self.pose_size = generator.num_poses * 2
+        self.pose_size = self.cfg.models.pose_size
         self.generator = generator
-        self.use_static_z = use_static_z
-        self.replace_tight_bbox = replace_tight_bbox
-        if self.use_static_z:
-            self.static_z = self.generator.generate_latent_variable(
-                self.batch_size, "cuda", torch.float32).zero_()
+        self.truncation_level = truncation_level
         self.save_debug = save_debug
-        self.debug_directory = os.path.join(".debug", "inference")
-        if self.save_debug:
-            os.makedirs(self.debug_directory, exist_ok=True)
+        self.fp16_inference = fp16_inference
+        self.debug_directory = pathlib.Path(".debug", "inference")
+        self.debug_directory.mkdir(exist_ok=True, parents=True)
 
-    def anonymize_images(self, images, im_keypoints, im_bboxes):
-        face_info = self.pre_process_faces(images, im_keypoints, im_bboxes)
-        generated_faces = self.anonymize_faces(face_info)
-        anonymized_images = self.post_process(face_info,
-                                              generated_faces,
-                                              images)
-        if self.save_debug:
-            self.save_debug_images(face_info, generated_faces)
-        return anonymized_images
+    @torch.no_grad()
+    def _get_face(self, batch):
+        keys = ["condition", "mask", "landmarks", "z"]
+        forward = [batch[k] for k in keys]
+#        print([x.shape for x in forward])
+        with torch.cuda.amp.autocast(enabled=self.fp16_inference):
+            return self.generator(*forward).cpu()
 
-    def save_debug_images(self, face_info, generated_faces):
-        for face_idx, info in face_info.items():
-            torch_input = info["torch_input"].squeeze(0)
-            generated_face = generated_faces[face_idx]
-            torch_input = torch_utils.image_to_numpy(torch_input,
-                                                     to_uint8=True,
-                                                     denormalize=True)
-            generated_face = torch_utils.image_to_numpy(generated_face,
-                                                        to_uint8=True,
-                                                        denormalize=True)
-            to_save = np.concatenate((torch_input, generated_face), axis=1)
-            filepath = os.path.join(self.debug_directory,
-                                    f"face_{face_idx}.jpg")
-            cv2.imwrite(filepath, to_save[:, :, ::-1])
-
-    def pre_process_faces(self, images, im_keypoints, im_bboxes):
-        face_info = {}
-        face_idx = 0
-        for im_idx in range(len(images)):
-            im = images[im_idx].copy()
-            face_keypoints = im_keypoints[im_idx]
-
-            face_bboxes = im_bboxes[im_idx]
-            for keypoint, bbox in zip(face_keypoints, face_bboxes):
-                res = infer.pre_process(im.copy(), keypoint, bbox,
-                                        self.inference_imsize, cuda=False)
-                if res is None:
-                    continue
-                torch_input, keypoint, expanded_bbox, new_bbox = res
-                face_info[face_idx] = {
-                    "im_idx": im_idx,
-                    "face_bbox": bbox,
-                    "torch_input": torch_input,
-                    "translated_keypoint": keypoint,
-                    "expanded_bbox": expanded_bbox
-                }
-                face_idx += 1
-        if len(face_info) == 0:
-            return face_info
-        return face_info
-
-    def anonymize_faces(self, face_info):
-        torch_faces = torch.empty((len(face_info), 3, self.inference_imsize, self.inference_imsize),
-                                  dtype=torch.float32)
-        torch_keypoints = torch.empty((len(face_info), self.pose_size),
-                                      dtype=torch.float32)
-        for face_idx, face in face_info.items():
-            torch_faces[face_idx] = face["torch_input"]
-            torch_keypoints[face_idx] = face["translated_keypoint"]
-
-        num_batches = int(np.ceil(len(face_info) / self.batch_size))
-        results = []
-        with torch.no_grad():
-            for batch_idx in tqdm.trange(num_batches, desc="Anonyimizing faces"):
-                im = torch_faces[batch_idx*self.batch_size:
-                                 (batch_idx+1)*self.batch_size]
-                keypoints = torch_keypoints[batch_idx*self.batch_size:
-                                            (batch_idx+1)*self.batch_size]
-                im = torch_utils.to_cuda(im)
-                keypoints = torch_utils.to_cuda(keypoints)
-                if self.use_static_z:
-                    z = self.static_z.clone()
-                    z = z[:len(im)]
-                    generated_faces = self.generator(im, keypoints, z)
-                else:
-                    generated_faces = self.generator(im, keypoints)
-                results.append(generated_faces.cpu())
-
-        generated_faces = torch.cat(results) if len(results) else torch.tensor([])
-        return generated_faces
-
-    def post_process(self, face_info, generated_faces, images):
-        anonymized_images = [im.copy() for im in images]
-        im_to_face_idx = defaultdict(list)
-        for face_idx, info in face_info.items():
-            im_idx = info["im_idx"]
-            im_to_face_idx[im_idx].append(face_idx)
-
-        for im_idx, face_indices in tqdm.tqdm(im_to_face_idx.items(), desc="Post-processing"):
-            im = anonymized_images[im_idx]
-            replaced_mask = np.ones_like(im).astype("bool")
-            for face_idx in face_indices:
-                generated_face = generated_faces[face_idx:face_idx+1]
-                expanded_bbox = face_info[face_idx]["expanded_bbox"]
-                original_bbox = face_info[face_idx]["face_bbox"]
-                im = infer.post_process(im, generated_face, expanded_bbox,
-                                        original_bbox, replaced_mask,
-                                        replace_tight_bbox=self.replace_tight_bbox)
-
-                if self.save_debug:
-                    filepath = os.path.join(self.debug_directory,
-                                            f"mask_{im_idx}_{face_idx}.jpg")
-                    cv2.imwrite(filepath, np.array(replaced_mask, dtype=np.uint8) * 255)
-
-            anonymized_images[im_idx] = im
-
+    @torch.no_grad()
+    def anonymize_images(self,
+                         images: np.ndarray,
+                         image_annotations: typing.List[ImageAnnotation]
+                         ) -> typing.List[np.ndarray]:
+        anonymized_images = []
+        for im_idx, image_annotation in enumerate(image_annotations):
+            # pre-process
+            imsize = self.inference_imsize
+            condition = torch.zeros(
+                (len(image_annotation), 3, imsize, imsize),
+                dtype=torch.float32)
+            mask = torch.zeros((len(image_annotation), 1, imsize, imsize))
+            landmarks = torch.empty(
+                (len(image_annotation), self.pose_size), dtype=torch.float32)
+            for face_idx in range(len(image_annotation)):
+                face, mask_ = image_annotation.get_face(face_idx, imsize)
+                condition[face_idx] = torch_utils.image_to_torch(
+                    face, cuda=False, normalize_img=True
+                )
+                mask[face_idx, 0] = torch.from_numpy(mask_).float()
+                kp = image_annotation.aligned_keypoint(face_idx)
+                landmarks[face_idx] = kp[:, :self.pose_size]
+            img = condition
+            condition = condition * mask
+            z = infer.truncated_z(
+                condition, self.cfg.models.generator.z_shape,
+                self.truncation_level)
+            batches = dict(
+                condition=condition,
+                mask=mask,
+                landmarks=landmarks,
+                z=z,
+                img=img
+            )
+            # Inference
+            anonymized_faces = np.zeros((
+                len(image_annotation), imsize, imsize, 3), dtype=np.float32)
+            for idx, batch in enumerate(
+                    batched_iterator(batches, self.batch_size)):
+                face = self._get_face(batch)
+                face = torch_utils.image_to_numpy(
+                    face, to_uint8=False, denormalize=True)
+                start = idx * self.batch_size
+                anonymized_faces[start:start + self.batch_size] = face
+            anonymized_image = image_annotation.stitch_faces(anonymized_faces)
+            anonymized_images.append(anonymized_image)
+            if self.save_debug:
+                num_faces = len(batches["condition"])
+                for face_idx in range(num_faces):
+                    orig_face = torch_utils.image_to_numpy(
+                        batches["img"][face_idx], denormalize=True, to_uint8=True)
+                    condition = torch_utils.image_to_numpy(
+                        batches["condition"][face_idx],
+                        denormalize=True, to_uint8=True)
+                    fake_face = anonymized_faces[face_idx]
+                    fake_face = (fake_face * 255).astype(np.uint8)
+                    to_save = np.concatenate(
+                        (orig_face, condition, fake_face), axis=1)
+                    filepath = self.debug_directory.joinpath(
+                        f"im{im_idx}_face{face_idx}.png")
+                    cv2.imwrite(str(filepath), to_save[:, :, ::-1])
 
         return anonymized_images
+
+    def use_mask(self):
+        return self.generator.use_mask
