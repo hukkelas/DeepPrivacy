@@ -5,7 +5,8 @@
 
 DeepPrivacy is a fully automatic anonymization technique for images.
 
-This repository contains the source code for the paper [*"DeepPrivacy: A Generative Adversarial Network for Face Anonymization"*](https://arxiv.org/abs/1909.04538), published at ISVC 2019.
+This repository contains the source code for the paper [*"DeepPrivacy: A Generative Adversarial Network for Face Anonymization"*](https://arxiv.org/abs/1909.04538) published at ISVC 2019, and  [*"Image Inpainting with Learnable Feature Imputation
+"*](https://arxiv.org/abs/2011.01077) published at GCPR 2020.
 
 ![](images/generated_results.png)
 
@@ -37,7 +38,7 @@ Check out [GCPR readme](GCPR.md) to reproduce our results from our publication "
 Install the following: 
 - Pytorch  >= 1.7.0 (Some checkpoints requires a bug fix from pytorch 1.7 - the current master branch)
 - Torchvision >= 0.6.0
-- NVIDIA Apex (If you want to train any models)
+- NVIDIA Apex (If you want to train any models - nolt needed for inference)
 - Python >= 3.6
 
 Simply by running our `setup.py` file:
