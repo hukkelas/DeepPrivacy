@@ -1,197 +1,132 @@
-import os
-import cv2
+import argparse
 import torch
 import numpy as np
-from deep_privacy import config_parser, utils
-from deep_privacy.models.generator import Generator
-from deep_privacy.dataset_tools import utils as dataset_utils
-from deep_privacy.data_tools.dataloaders import cut_bounding_box
-from deep_privacy.data_tools.data_utils import denormalize_img
+from deep_privacy.engine.checkpointer import get_checkpoint, load_checkpoint_from_url
+from typing import List
+from deep_privacy import config, logger
 import deep_privacy.torch_utils as torch_utils
+from deep_privacy import modeling
 
 
-def init_generator(config, ckpt):
-    g = Generator(
-        config.models.pose_size,
-        config.models.start_channel_size,
-        config.models.image_channels
-    )
-    g.load_state_dict(ckpt["running_average_generator"])
+def init_generator(cfg, ckpt=None):
+    g = modeling.models.build_generator(cfg, data_parallel=False)
+    if ckpt is not None:
+        g.load_state_dict(ckpt["running_average_generator"])
     g.eval()
     torch_utils.to_cuda(g)
     return g
 
 
-def get_images_recursive(image_folder):
-    endings = [".jpg", ".jpeg", ".png"]
-    if os.path.isfile(image_folder):
-        return [image_folder]
-    images = []
-    for root, dirs, files in os.walk(image_folder):
-        for fname in files:
-            if fname[-4:] in endings or fname[-5:] in endings:
-                impath = os.path.join(
-                    root, fname
-                )
-                images.append(impath)
-    return images
-
-
-def to_numpy(el):
-    if isinstance(el, torch.Tensor):
-        return el.numpy()
-    if isinstance(el, list) or isinstance(el, tuple):
-        return np.array(el)
-    return el
-
-
-def shift_bbox(orig_bbox, expanded_bbox, new_imsize):
-    orig_bbox = to_numpy(orig_bbox).astype(float)
-    expanded_bbox = to_numpy(expanded_bbox).astype(float)
-
-    x0, y0, x1, y1 = orig_bbox
-    x0e, y0e, x1e, y1e = expanded_bbox
-    x0, x1 = x0 - x0e, x1 - x0e
-    y0, y1 = y0 - y0e, y1 - y0e
-    w_ = x1e - x0e
-    x0, y0, x1, y1 = [int(k*new_imsize/w_) for k in [x0, y0, x1, y1]]
-    return [x0, y0, x1, y1]
-
-
-def keypoint_to_torch(keypoint):
-    keypoint = np.array([keypoint[i, j]
-                         for i in range(keypoint.shape[0]) for j in range(2)])
-    keypoint = torch.from_numpy(keypoint).view(1, -1)
-    return keypoint
-
-
-def keypoint_to_numpy(keypoint):
-    return keypoint.view(-1, 2).numpy()
-
-
-def shift_and_scale_keypoint(keypoint, expanded_bbox):
-    keypoint = keypoint.copy().astype(float)
-    keypoint[:, 0] -= expanded_bbox[0]
-    keypoint[:, 1] -= expanded_bbox[1]
-    w = expanded_bbox[2] - expanded_bbox[0]
-    keypoint /= w
-    return keypoint
-
-
-SIMPLE_EXPAND = False
-
-
-def pre_process(im, keypoint, bbox, imsize, cuda=True):
-    bbox = to_numpy(bbox)
-    expanded_bbox = dataset_utils.expand_bbox(bbox, im.shape, SIMPLE_EXPAND,
-                                              default_to_simple=True,
-                                              expansion_factor1=0.35)
-    to_replace = dataset_utils.cut_face(im, expanded_bbox, SIMPLE_EXPAND)
-    new_bbox = shift_bbox(bbox, expanded_bbox, imsize)
-    new_keypoint = shift_and_scale_keypoint(keypoint, expanded_bbox)
-    to_replace = cv2.resize(to_replace, (imsize, imsize))
-    to_replace = cut_bounding_box(to_replace.copy(), torch.tensor(new_bbox),
-                                  1.0)
-    to_replace = torch_utils.image_to_torch(to_replace, cuda=cuda)
-    keypoint = keypoint_to_torch(new_keypoint)
-    torch_input = to_replace * 2 - 1
-    return torch_input, keypoint, expanded_bbox, new_bbox
-
-
-def stitch_face(im, expanded_bbox, generated_face, bbox_to_extract, image_mask, original_bbox, tight_stitch=False):
-    # Ugly but works....
-    # if tight_stitch is set to true, only the part of the image inside original_bbox is updated
-    x0e, y0e, x1e, y1e = expanded_bbox
-    x0o, y0o, x1o, y1o = bbox_to_extract
-    x0, y0, x1, y1 = original_bbox
-
-    if tight_stitch:
-        original_bbox_mask =  np.zeros_like(image_mask, dtype=bool)
-        original_bbox_mask[y0:y1, x0:x1, :] = 1
-        original_bbox_mask = np.logical_and(original_bbox_mask, image_mask)
-        mask_single_face = original_bbox_mask[y0e:y1e, x0e:x1e]
-
-    else:
-        mask_single_face = image_mask[y0e:y1e, x0e:x1e]
-
-    to_replace = im[y0e:y1e, x0e:x1e]
-    generated_face = generated_face[y0o:y1o, x0o:x1o]
-    to_replace[mask_single_face] = generated_face[mask_single_face]
-    im[y0e:y1e, x0e:x1e] = to_replace
-    image_mask[y0:y1, x0:x1, :] = 0
-    return im
-
-
-def replace_face(im, generated_face, image_mask, original_bbox, expanded_bbox,
-                 replace_tight_bbox=False):
-    original_bbox = to_numpy(original_bbox)
-    assert expanded_bbox[2] - expanded_bbox[0] == generated_face.shape[1], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
-    assert expanded_bbox[3] - expanded_bbox[1] == generated_face.shape[0], f'Was: {expanded_bbox}, Generated Face: {generated_face.shape}'
-
-    bbox_to_extract = np.array(
-        [0, 0, generated_face.shape[1], generated_face.shape[0]])
-    for i in range(2):
-        if expanded_bbox[i] < 0:
-            bbox_to_extract[i] -= expanded_bbox[i]
-            expanded_bbox[i] = 0
-    if expanded_bbox[2] > im.shape[1]:
-        diff = expanded_bbox[2] - im.shape[1]
-        bbox_to_extract[2] -= diff
-        expanded_bbox[2] = im.shape[1]
-    if expanded_bbox[3] > im.shape[0]:
-        diff = expanded_bbox[3] - im.shape[0]
-        bbox_to_extract[3] -= diff
-        expanded_bbox[3] = im.shape[0]
-
-    im = stitch_face(im, expanded_bbox, generated_face,
-                     bbox_to_extract, image_mask, original_bbox,
-                     tight_stitch=replace_tight_bbox)
-    return im
-
-
-def post_process(im, generated_face, expanded_bbox, original_bbox, image_mask,
-                 replace_tight_bbox=False):
-    generated_face = denormalize_img(generated_face)
-    generated_face = torch_utils.image_to_numpy(
-        generated_face[0], to_uint8=True)
-    orig_imsize = expanded_bbox[2] - expanded_bbox[0]
-    generated_face = cv2.resize(generated_face, (orig_imsize, orig_imsize))
-    im = replace_face(im, generated_face, image_mask,
-                      original_bbox, expanded_bbox,
-                      replace_tight_bbox=replace_tight_bbox)
-    return im
-
-
-def get_default_target_path(source_path, target_path, config_path):
-    if target_path != "":
-        return target_path
-    if source_path.endswith(".mp4"):
-        basename = source_path.split(".")
-        assert len(basename) == 2
-        return f"{basename[0]}_anonymized.mp4"
-    default_path = os.path.join(
-        os.path.dirname(config_path),
-        "anonymized_images"
+def infer_parser() -> argparse.ArgumentParser:
+    parser = config.default_parser()
+    parser.add_argument(
+        "-s", "--source_path",
+        help="Target to infer",
+        default="test_examples/images"
     )
-    print("Setting target path to default:", default_path)
-    return default_path
+    parser.add_argument(
+        "-t", "--target_path",
+        help="Target path to save anonymized result.\
+                Defaults to subdirectory of config file."
+    )
+    parser.add_argument(
+        "--step", default=None, type=int,
+        help="Set validation checkpoint to load. Defaults to most recent"
+    )
+    return parser
 
 
-def read_args(additional_args=[]):
-    config = config_parser.initialize_and_validate_config([
-        {"name": "source_path", "default": "test_examples/source"},
-        {"name": "target_path", "default": ""}
-    ] + additional_args)
-    target_path = config.target_path
-    target_path = get_default_target_path(config.source_path,
-                                          config.target_path,
-                                          config.config_path)
-    ckpt = utils.load_checkpoint(config.checkpoint_dir)
-    generator = init_generator(config, ckpt)
+def load_model_from_checkpoint(
+        cfg,
+        validation_checkpoint_step: int = None,
+        include_discriminator=False):
+    try:
+        ckpt = get_checkpoint(cfg.output_dir, validation_checkpoint_step)
+    except FileNotFoundError:
+        ckpt = None
+        ckpt = load_checkpoint_from_url(cfg.model_url)
+    if ckpt is None:
+        logger.warn(f"Could not find checkpoint. {cfg.output_dir}")
+    generator = init_generator(cfg, ckpt)
+    generator = jit_wrap(generator, cfg)
+    if include_discriminator:
+        discriminator = modeling.models.build_discriminator(
+            cfg, data_parallel=False)
+        discriminator.load_state_dict(ckpt["D"])
+        discriminator = torch_utils.to_cuda(discriminator)
+        return generator, discriminator
+    return generator
 
-    imsize = ckpt["current_imsize"]
-    source_path = config.source_path
-    image_paths = get_images_recursive(source_path)
-    if additional_args:
-        return generator, imsize, source_path, image_paths, target_path, config
-    return generator, imsize, source_path, image_paths, target_path
+
+def jit_wrap(generator, cfg):
+    """
+        Torch JIT wrapper for accelerated inference
+    """
+    if not cfg.anonymizer.jit_trace:
+        return generator
+    imsize = cfg.models.max_imsize
+    x_in = torch.randn((1, 3, imsize, imsize))
+    example_inp = dict(
+        condition=x_in,
+        mask=torch.randn((1, 1, imsize, imsize)).bool().float(),
+        landmarks=torch.randn((1, cfg.models.pose_size)),
+        z=truncated_z(x_in, cfg.models.generator.z_shape, 5)
+    )
+    example_inp = {k: torch_utils.to_cuda(v) for k, v in example_inp.items()}
+    generator = torch.jit.trace(
+        generator,
+        (example_inp["condition"],
+         example_inp["mask"],
+         example_inp["landmarks"],
+         example_inp["z"]),
+        optimize=True)
+    return generator
+
+
+def truncated_z(x_in: torch.Tensor, z_shape, truncation_level: float):
+    z_shape = ((x_in.shape[0], *z_shape))
+    if truncation_level == 0:
+        return torch.zeros(z_shape, dtype=x_in.dtype, device=x_in.device)
+
+    z = torch.randn(z_shape, device=x_in.device, dtype=x_in.dtype)
+    while z.abs().max() >= truncation_level:
+        mask = z.abs() >= truncation_level
+        z_ = torch.randn(z_shape, device=x_in.device, dtype=x_in.dtype)
+        z[mask] = z_[mask]
+    return z
+
+
+def infer_images(
+        dataloader, generator, truncation_level: float,
+        verbose=False,
+        return_condition=False) -> List[np.ndarray]:
+    imshape = (generator.current_imsize, generator.current_imsize, 3)
+    real_images = np.empty(
+        (dataloader.num_images(), *imshape), dtype=np.float32)
+    fake_images = np.empty_like(real_images)
+    if return_condition:
+        conditions = np.empty_like(fake_images)
+    batch_size = dataloader.batch_size
+    generator.eval()
+    dl_iter = iter(dataloader)
+    if verbose:
+        import tqdm
+        dl_iter = tqdm.tqdm(dl_iter)
+    with torch.no_grad():
+        for idx, batch in enumerate(dl_iter):
+            real_data = batch["img"]
+            z = truncated_z(real_data, generator.z_shape, truncation_level)
+            fake_data = generator(**batch, z=z)
+            start = idx * batch_size
+            end = start + len(real_data)
+            real_data = torch_utils.image_to_numpy(real_data, denormalize=True)
+            fake_data = torch_utils.image_to_numpy(fake_data, denormalize=True)
+            real_images[start:end] = real_data
+            fake_images[start:end] = fake_data
+            if return_condition:
+                conditions[start:end] = torch_utils.image_to_numpy(
+                    batch["condition"], denormalize=True)
+    generator.train()
+    if return_condition:
+        return real_images, fake_images, conditions
+    return real_images, fake_images

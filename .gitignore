@@ -1,3 +1,7 @@
+*.yaml
+*.pkl
+*.mp4
+*.flist
 .cache/
 data
 input_images/
@@ -17,7 +21,10 @@ __pycache__
 *.fid_cache
 *.npy
 *.gz
-*.ipynb
+cherry/
+*.png
+*.jpg
+paper_models/
 validation_checkpoints/
 test_scripts/
 fid/
@@ -36,5 +43,21 @@ inception/
 .fid_cache/
 tensorboard_summaries/
 
+# Only allow named notebooks
+Untitled**.ipynb
+**/.ipynb_checkpoints/**
+*.log
 *.pyc
 *.csv
+*.yml
+*.txt
+*.ods
+*.ods#
+paper_figures/
+*_ours.png
+build/
+*.egg-info
+*.egg
+configs/unet_D.py
+*.json
+outputs/

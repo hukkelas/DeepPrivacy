@@ -1,4 +1,6 @@
 # DeepPrivacy
+
+
 ![](images/example.gif)
 
 DeepPrivacy is a fully automatic anonymization technique for images.
@@ -15,7 +17,90 @@ DeepPrivacy detects faces with state-of-the-art detection methods.
 [Mask R-CNN](https://arxiv.org/abs/1703.06870) is used to generate a sparse pose information of the face, and [DSFD](https://arxiv.org/abs/1810.10220) is used to detect faces in the image.
 ![](images/overall_architecture.png)
 
-[Click here to test it on Google Colab!](https://drive.google.com/open?id=1mR5DcND9JCxqr1rXsavVYKzFQq4gOI5-)
+## Information
+Check out the original version here:
+
+Check out [GCPR readme](GCPR.md) to reproduce our results from our publication "Image Inpainting with Learnable Feature Imputation".
+
+
+## New features in version 2
+- FP16 inference
+- Support for face detection and landmark detection with a single SSD model (retinanet).
+- Face alignment before anonymization - improves performance for rotate faces.
+- Heavily refactored code.
+- All improvements from our paper "Image Inpainting with Learnable Feature Imputation" are included.
+- Support for standard image inpainting datasets (CelebA-HQ and Places2).
+- Support for video inference
+
+
+## Installation
+Install the following: 
+- Pytorch  >= 1.7.0 (Some checkpoints requires a bug fix from pytorch 1.7 - the current master branch)
+- Torchvision >= 0.6.0
+- NVIDIA Apex (If you want to train any models)
+- Python >= 3.6
+
+Simply by running our `setup.py` file:
+
+```
+python3 setup.py install
+```
+or with pip:
+```
+pip install git+https://github.com/hukkelas/DeepPrivacy/
+```
+
+#### Docker
+In our experiments, we use docker as the virtual environment. 
+
+Our docker image can be built by running:
+```bash
+cd docker/
+
+docker build -t deep_privacy . 
+```
+
+## Usage
+
+We have a file command line interface to anonymize images.
+```
+python3 anonymize.py --source_path input_image.png --target_path output_path.png
+```
+You can change the model with the "-m" or "--model" flag (see model zoo).
+The cli accepts image files, video files, and directories.
+
+The cli is also available outside the folder `python -m deep_privacy.cli`.
+
+Also check out `python -m deep_privacy.cli -h ` for more arguments.
+
+
+### Webcam
+Test out the model with
+```
+python webcam.py
+```
+Also check out `python webcam.py -h ` for more arguments.
+
+
+
+## Anonymization Model Zoo
+| Model | Dataset | Detector | Num parameters| 
+|--|--|--|--|
+|deep_privacy_v1|FDF 128x128|DSFD face detector + Mask RCNN for keypoints|46.92M|
+|fdf128_rcnn512 (**recommended**)|FDF 128x128|DSFD face detector + Mask RCNN for keypoints|47.39M|
+|fdf128_retinanet512|FDF 128x128|SSD-based RetinaNet with ResNet50 backbone|49.84M|
+|fdf128_retinanet256|FDF 128x128|SSD-based RetinaNet with ResNet50 backbone|12.704M|
+|fdf128_retinanet128|FDF 128x128|SSD-based RetinaNet with ResNet50 backbone|3.17M|
+
+### Retinanet Detector
+Combined keypoint and face detection in one single-shot model (SSD-based).
+Uses five landmarks: eyes, nose, and mouth (left and right).
+Model is based on [RetinaFace](https://arxiv.org/abs/1905.00641).
+The model is significantly faster, but has poorer detection than DSFD.
+
+### DSFD + RCNN
+Uses [Mask R-CNN](https://arxiv.org/abs/1703.06870) is for keypoint detection, and [DSFD](https://arxiv.org/abs/1810.10220) for face detection.
+![](images/overall_architecture.png)
 
 ## Citation
 If you find this code useful, please cite the following:
@@ -37,112 +122,13 @@ isbn="978-3-030-33720-9"
 ## FDF Dataset
 The FDF dataset will be released at [github:hukkelas/FDF](https://github.com/hukkelas/FDF)
 
-## Setting up your environment
-Install the following: 
-- Pytorch  >= 1.0.0
-- Torchvision >= 0.3.0
-- NVIDIA Apex (Master branch)
-- Python >= 3.6
-
-Then, install python packages:
-
-```pip install -r docker/requirements.txt``` 
-
-### Docker
-In our experiments, we use docker as the virtual environment. 
-
-Our docker image can be built by running:
-```bash
-cd docker/
-
-docker build -t deep_privacy . 
-```
-Then, training can be started with:
-
-```bash
-nvidia-docker run --rm  -it -v $PWD:/workspace  -e CUDA_VISIBLE_DEVICES=0 deep_privacy python -m deep_privacy.train models/large/config.yml
-```
-
-## Config files
-Hyperparameters and more can be set through config files, named `config.yml`.
-
-From our paper, the following config files corresponds to our models
-
-- `models/default/config.yml`: Default 12M parameter model with pose (Max 256 channels in convolutions.)
-- `models/no_pose/config.yml`: Default 12M parameter model without pose
-- `models/large/config.yml` (**BEST:**): Default 46M parameter model with pose (Max 512 channels in convolutions). If you have the compute power, we recommend to use this model.
-- `models/deep_discriminator/config.yml`: Default deep discriminator model.
-
-### Pre-trained models
-For each config file, you can download pre-trained models from the following URLS:
-
-- [`models/default/config.yml`](https://drive.google.com/open?id=1P_UO1ZSJzIUeVEkbmhc68XB3csvAyaB9)
-- [`models/no_pose/config.yml`](https://drive.google.com/open?id=1hYye3ZfrILPfpRp22mzjwwMsot6RV7DJ)
-- [`models/large/config.yml`](https://drive.google.com/open?id=1RXM0xIoaHARrZ87r-PFEVVOc9BjDuWc5)
-- [`models/deep_discriminator/config.yml`](https://drive.google.com/drive/folders/1DZY40wh-EpoywBsNmH7nU8iNXdt-L7O3?usp=sharing)
-
-## Automatic inference and anonymization of images
-There are several scripts to perform inference
-
-Every scripts require a path to a `config.yml` file. In these examples, we use the default model with 256 channels in the generator.
-
-**Download Face Detector:** Before running inference, we expect that you have downloaded the DSFD face detection model, and place it to the path: `deep_privacy/detection/dsfd/weights/WIDERFace_DSFD_RES152.pth`.
-This can be downloaded from the [official repository for DSFD](https://github.com/TencentYoutuResearch/FaceDetection-DSFD)
-[[Google Drive Link](https://drive.google.com/file/d/1WeXlNYsM6dMP3xQQELI-4gxhwKUQxc3-/view?usp=sharing)].
-
-### Anonymizing a single image or folder
-
-Run
-```bash
-python -m deep_privacy.inference.anonymize_folder model/default/config.yml --source_path testim.jpg --target_path testim_anonymized.jpg
-```
-
-### Anonymizing Videos
-
-Run 
-```bash
-python -m deep_privacy.inference.anonymize_video model/default/config.yml --source_path path/to/video.mp4 --target_path path/to/video_anonymized.mp4
-```
-**Note:** DeepPrivacy is a frame-by-frame method, ensuring no temporal consistency in videos.
-
-
-### Anonymizing WIDER-Face Validation Datset
-Run
-```
-python -m deep_privacy.inference.anonymize_wider models/default/config.yml --source_path path/to/Wider/face/dataset --target_path /path/to/output/folder
-```
-This expects the source path to include the following folders: `WIDER_val` and `wider_face_split`.
-
-
-## Calculate FID scores
-1. Generate real and fake images, where the last argument is the model config:
-```bash
-python -m deep_privacy.metrics.fid_official.calculate_fid models/default/config.yml
-```
-
-2. Calculate FID with the official tensorflow code:
-```bash
-python deep_privacy/metrics/fid_official/calculate_fid_official.py models/default/fid_images/real models/default/fid_images/fake
-```
-Where the two last arguments are the paths to real and fake images.
-
-**NOTE:** We use nvidias tensorflow docker container to run the FID code.: [nvcr.io/nvidia/tensorflow:19.06-py3](https://docs.nvidia.com/deeplearning/frameworks/tensorflow-release-notes/rel_19.06.html#rel_19.06)
-
-
-## Training your own model
-
-Training your own model is easy. First, download our FDF dataset, and put it under `data/fdf`.
-
-Then run:
-```bash
-python -m deep_privacy.train models/default/config.yml
-```
-
 
 ## License
-All code is under MIT license, except the following:
+All code is under MIT license, except the following. 
 
 Code under [deep_privacy/detection](deep_privacy/detection):
 - DSFD is taken from [https://github.com/hukkelas/DSFD-Pytorch-Inference](https://github.com/hukkelas/DSFD-Pytorch-Inference) and follows APACHE-2.0 License
 - Mask R-CNN implementation is taken from Pytorch source code at [pytorch.org](https://pytorch.org/docs/master/torchvision/models.html#object-detection-instance-segmentation-and-person-keypoint-detection)
 - FID calculation code is taken from the official tensorflow implementation: [https://github.com/bioinf-jku/TTUR](https://github.com/bioinf-jku/TTUR)
+- Checkpoints published with the model follows the license of the FDF dataset.
+

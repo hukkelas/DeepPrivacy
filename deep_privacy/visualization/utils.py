@@ -1,12 +1,13 @@
 import cv2
 import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 
 
 colors = list(matplotlib.colors.cnames.values())
 
 
-def hex_to_rgb(h): return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+def hex_to_rgb(h): return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
 colors = [hex_to_rgb(x[1:]) for x in colors]
@@ -18,7 +19,8 @@ def draw_faces_with_keypoints(
         im_bboxes,
         im_keypoints,
         radius=None,
-        black_out_face=False
+        black_out_face=False,
+        color_override=None
 ):
     im = im.copy()
     if im_keypoints is None:
@@ -27,38 +29,31 @@ def draw_faces_with_keypoints(
     if im_bboxes is None:
         im_bboxes = [None for i in range(len(im_keypoints))]
     if radius is None:
-        radius = max(int(max(im.shape)*0.0025), 1)
+        radius = max(int(max(im.shape) * 0.0025), 1)
     for c_idx, (bbox, keypoint) in enumerate(zip(im_bboxes, im_keypoints)):
-        color = colors[c_idx % len(colors)]
+        color = color_override
+        if color_override is None:
+            color = colors[c_idx % len(colors)]
+
         if bbox is not None:
             x0, y0, x1, y1 = bbox
             if black_out_face:
-                im[y0:y1, x0:x1, :] = 128
+                im[y0:y1, x0:x1, :] = 0
             else:
                 im = cv2.rectangle(im, (x0, y0), (x1, y1), color)
         if keypoint is None:
             continue
         for x, y in keypoint:
             im = cv2.circle(im, (int(x), int(y)), radius, color)
-    if type(im) != np.ndarray:
-        return im.get()
-    return im
-
-
-def draw_faces(im, bboxes):
-    for c_idx, bbox in enumerate(bboxes):
-        color = colors[c_idx % len(colors)]
-        x0, y0, x1, y1 = [int(_) for _ in bbox]
-        im = cv2.rectangle(im, (x0, y0), (x1, y1), color)
-    if type(im) != np.ndarray:
+    if not isinstance(im, np.ndarray):
         return im.get()
     return im
 
 
 def np_make_image_grid(images, nrow, pad=2):
-    imsize = images[0].shape[0]
-    ncol = int(np.ceil(len(images) / 2))
-    im_result = np.zeros((nrow*(imsize+pad), ncol*(imsize+pad), 3),
+    height, width = images[0].shape[:2]
+    ncol = int(np.ceil(len(images) / nrow))
+    im_result = np.zeros((nrow * (height + pad), ncol * (width + pad), 3),
                          dtype=images[0].dtype)
     im_idx = 0
     for row in range(nrow):
@@ -67,6 +62,55 @@ def np_make_image_grid(images, nrow, pad=2):
                 break
             im = images[im_idx]
             im_idx += 1
-            im_result[row*(pad+imsize): (row)*(pad+imsize) + imsize,
-                      col*(pad+imsize): (col)*(pad+imsize) + imsize, :] = im
+            im_result[row * (pad + height): (row) * (pad + height) + height,
+                      col * (pad + width): (col) * (pad + width) + width, :] = im
     return im_result
+
+
+def add_text(im, x, y, text):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    bottomLeftCornerOfText = (x, y + 10)
+    fontScale = .4
+    fontColor = (255, 255, 255)
+    backgroundColor = (0, 0, 0)
+    lineType = 1
+
+    cv2.putText(im, text,
+                bottomLeftCornerOfText,
+                font,
+                fontScale,
+                backgroundColor,
+                lineType * 2)
+    cv2.putText(im, text,
+                bottomLeftCornerOfText,
+                font,
+                fontScale,
+                fontColor,
+                lineType)
+
+
+def add_label_y(im, positions, labels):
+    # positions [(x, y)]
+    im = im.copy()
+    assert len(positions) == len(labels)
+    for pos, label in zip(positions, labels):
+        add_text(im, 0, pos, label)
+    return im
+
+
+def plot_bbox(bbox):
+    x0, y0, x1, y1 = bbox
+    plt.plot([x0, x0, x1, x1, x0], [y0, y1, y1, y0, y0])
+
+
+def pad_im_as(im, target_im):
+    assert len(im.shape) == 3
+    assert len(target_im.shape) == 3
+    assert im.shape[0] <= target_im.shape[0]
+    assert im.shape[1] <= target_im.shape[1],\
+        f"{im.shape}, {target_im.shape}"
+    pad_h = abs(im.shape[0] - target_im.shape[0]) // 2
+    pad_w = abs(im.shape[1] - target_im.shape[1]) // 2
+    im = np.pad(im, ((pad_h, pad_h), (pad_w, pad_w), (0, 0)))
+    assert im.shape == target_im.shape
+    return im
