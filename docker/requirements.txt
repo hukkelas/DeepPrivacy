@@ -1,0 +1,14 @@
+cython
+numpy
+scikit-learn>=0.2
+matplotlib
+pandas
+tqdm
+tflib
+autopep8
+moviepy
+tensorboard
+opencv-python
+requests
+pyyaml
+scikit-image
