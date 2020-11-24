@@ -45,7 +45,11 @@ while(True):
         frames = 0
 
     frames += 1
-    print("FPS:", frames / (time.time() - t), end="\r")
+    delta = time.time() - t
+    fps = "?"
+    if delta > 1e-6:
+        fps = frames / delta
+    print(f"FPS: {delta:.3f}", end="\r")
     if args.debug:
         debug_im = cv2.imread(".debug/inference/im0_face0.png")
         debug_im = vis_utils.pad_im_as(debug_im, frame)
