@@ -8,18 +8,10 @@ class LatentVariableConcat(nn.Module):
 
     def __init__(self, conv2d_config):
         super().__init__()
-        self._normalized_conv = conv2d_config.conv.type == "nconv"
-        self._probabilistic = conv2d_config.conv.type == "probabilistic"
 
     def forward(self, _inp):
         x, mask, batch = _inp
         z = batch["z"]
-        if self._probabilistic:
-            var = torch.zeros_like(z) + 0.002
-            mask = torch.cat((mask, var), dim=1)
-        elif self._normalized_conv:
-            mask_ = torch.ones_like(z)
-            mask = torch.cat((mask, mask_), dim=1)
         x = torch.cat((x, z), dim=1)
         return (x, mask, batch)
 

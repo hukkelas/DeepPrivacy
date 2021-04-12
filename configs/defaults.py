@@ -38,15 +38,6 @@ models = dict(
                 type="conv",
                 wsconv=True,
                 gain=1,
-                #Probabilistic
-                variance_pad=0.2,
-
-            ),
-            probabilistic=dict(
-                lrelu_approximation=False,
-                input_var=0.002,
-                input_missing_var=0.5,
-                sample_output=False,
             )
         ),
         residual=False,

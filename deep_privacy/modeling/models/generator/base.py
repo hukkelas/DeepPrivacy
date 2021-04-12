@@ -42,6 +42,4 @@ class RunningAverageGenerator(Module):
             f"Expected either x_in or (batch_size, device, dtype. Got: {args}")
 
     def _get_input_mask(self, condition, mask):
-        if self.conv2d_config.conv.type == "nconv":
-            mask = mask.repeat(1, 3, 1, 1)
         return mask
