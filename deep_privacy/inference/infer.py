@@ -43,6 +43,7 @@ def load_model_from_checkpoint(
     try:
         ckpt = get_checkpoint(cfg.output_dir, validation_checkpoint_step)
     except FileNotFoundError:
+        cfg.model_url = f'{cfg.model_url}'.replace("http://", "https://", 1)
         ckpt = None
         ckpt = load_checkpoint_from_url(cfg.model_url)
     if ckpt is None:
