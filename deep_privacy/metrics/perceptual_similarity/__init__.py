@@ -1,6 +1,9 @@
 
 import numpy as np
-from skimage.metrics import structural_similarity as compare_ssim
+try:
+    from skimage.measure import compare_ssim
+except ImportError:
+    from skimage.metrics import structural_similarity as compare_ssim
 import torch
 from torch.autograd import Variable
 
