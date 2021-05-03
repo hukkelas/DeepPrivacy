@@ -31,7 +31,7 @@ else:
 frames = 0
 WARMUP = True
 t = time.time()
-while(True):
+while True:
     # Capture frame-by-frame
     ret, frame = cap.read()
     frame = cv2.resize(frame, (width, height))
