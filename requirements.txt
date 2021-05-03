@@ -1,0 +1,15 @@
+torch
+torchvision
+setuptools
+opencv-python
+numpy
+addict
+Pillow
+albumentations
+scipy
+scikit-image
+tqdm
+moviepy
+matplotlib
+scikit-learn>=0.2
+pandas

@@ -17,11 +17,11 @@ available_models = [
 ]
 
 config_urls = {
-    "fdf128_retinanet512": "http://folk.ntnu.no/haakohu/configs/fdf/retinanet512.json",
-    "fdf128_retinanet256": "http://folk.ntnu.no/haakohu/configs/fdf/retinanet256.json",
-    "fdf128_retinanet128": "http://folk.ntnu.no/haakohu/configs/fdf/retinanet128.json",
-    "fdf128_rcnn512": "http://folk.ntnu.no/haakohu/configs/fdf_512.json",
-    "deep_privacy_V1": "http://folk.ntnu.no/haakohu/configs/deep_privacy_v1.json",
+    "fdf128_retinanet512": "https://folk.ntnu.no/haakohu/configs/fdf/retinanet512.json",
+    "fdf128_retinanet256": "https://folk.ntnu.no/haakohu/configs/fdf/retinanet256.json",
+    "fdf128_retinanet128": "https://folk.ntnu.no/haakohu/configs/fdf/retinanet128.json",
+    "fdf128_rcnn512": "https://folk.ntnu.no/haakohu/configs/fdf_512.json",
+    "deep_privacy_V1": "https://folk.ntnu.no/haakohu/configs/deep_privacy_v1.json",
 }
 
 

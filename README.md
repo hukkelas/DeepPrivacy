@@ -65,7 +65,7 @@ docker build -t deep_privacy .
 
 We have a file command line interface to anonymize images.
 ```
-python3 anonymize.py --source_path input_image.png --target_path output_path.png
+python3 anonymize.py -s input_image.png -t output_path.png
 ```
 You can change the model with the "-m" or "--model" flag (see model zoo).
 The cli accepts image files, video files, and directories.

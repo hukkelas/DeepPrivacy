@@ -4,7 +4,11 @@ import skimage.measure
 import torch
 import tqdm
 import multiprocessing
-from skimage.measure import compare_ssim, compare_psnr
+try:
+    from skimage.measure import compare_ssim, compare_psnr
+except ImportError:
+    from skimage.metrics import structural_similarity as compare_ssim
+    from skimage.metrics import peak_signal_noise_ratio as compare_psnr
 from .perceptual_similarity import PerceptualLoss
 from deep_privacy import torch_utils
 from .fid_pytorch import fid as fid_api

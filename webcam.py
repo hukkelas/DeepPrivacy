@@ -7,6 +7,7 @@ from deep_privacy import cli
 from deep_privacy.visualization import utils as vis_utils
 from deep_privacy.utils import BufferlessVideoCapture
 from deep_privacy.build import build_anonymizer
+import os
 # Configs
 torch.backends.cudnn.benchmark = False
 parser = cli.get_parser()
@@ -30,7 +31,7 @@ else:
 frames = 0
 WARMUP = True
 t = time.time()
-while(True):
+while True:
     # Capture frame-by-frame
     ret, frame = cap.read()
     frame = cv2.resize(frame, (width, height))
