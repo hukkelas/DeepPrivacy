@@ -13,3 +13,4 @@ moviepy
 matplotlib
 scikit-learn>=0.2
 pandas
+face_detection
