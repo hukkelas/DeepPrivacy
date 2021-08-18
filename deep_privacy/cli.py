@@ -27,11 +27,15 @@ def get_target_paths(source_paths: typing.List[pathlib.Path],
                      default_dir: pathlib.Path):
     if not target_path is None:
         target_path = pathlib.Path(target_path)
-        assert len(source_paths) == 1, \
-            f"Target path is 1 file, but expected several inputs" + \
-            f"target path={target_path}, source_path={source_paths}"
-        target_path.parent.mkdir(exist_ok=True)
-        return [target_path]
+        if len(source_paths) > 1:
+            target_path.mkdir(exist_ok=True, parents=True)
+            target_paths = []
+            for source_path in source_paths:
+                target_paths.append(target_path.joinpath(source_path.name))
+            return target_paths
+        else:
+            target_path.parent.mkdir(exist_ok=True)
+            return [target_path]
     logger.info(
         f"Found no target path. Setting to default output path: {default_dir}")
     default_target_dir = default_dir
