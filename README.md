@@ -1,5 +1,5 @@
 # DeepPrivacy
-
+[[**Interactive Demo**]](https://huggingface.co/spaces/haakohu/DeepPrivacy)
 
 ![](images/example.gif)
 
