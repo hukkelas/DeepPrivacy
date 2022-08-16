@@ -135,7 +135,7 @@ def interpolate_mask(mask, transition_variable):
 @torch.no_grad()
 def interpolate_image(images, transition_variable):
     assert images.max() <= 1
-    y = torch.nn.functional.avg_pool2d(images * 255) // 1
+    y = torch.nn.functional.avg_pool2d(images * 255, 2) // 1
     y = torch.nn.functional.interpolate(y, scale_factor=2)
     images = get_transition_value(y, images, transition_variable)
     return images

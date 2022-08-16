@@ -75,7 +75,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     cfg = Config.fromfile(args.config_path)
     imsize = cfg.models.max_imsize
-    dl_train = build_dataloader_val(cfg, imsize)
+    dl_train = build_dataloader_val(cfg, imsize, lambda: 1)
     batch = next(iter(dl_train))
     im0 = batch["condition"]
     im1 = batch["img"]
