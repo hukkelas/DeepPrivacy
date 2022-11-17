@@ -3,6 +3,8 @@
 
 ![](images/example.gif)
 
+### Check out the new [DeepPrivacy2](https://github.com/hukkelas/deep_privacy2)! It significantly improves anonymization quality compared to this repository.
+
 DeepPrivacy is a fully automatic anonymization technique for images.
 
 This repository contains the source code for the paper [*"DeepPrivacy: A Generative Adversarial Network for Face Anonymization"*](https://arxiv.org/abs/1909.04538) published at ISVC 2019, and  [*"Image Inpainting with Learnable Feature Imputation
