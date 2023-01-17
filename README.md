@@ -89,8 +89,8 @@ Also check out `python webcam.py -h ` for more arguments.
 ## Anonymization Model Zoo
 | Model | Dataset | Detector | Num parameters| 
 |--|--|--|--|
-|deep_privacy_v1|FDF 128x128|DSFD face detector + Mask RCNN for keypoints|46.92M|
-|fdf128_rcnn512 (**recommended**)|FDF 128x128|DSFD face detector + Mask RCNN for keypoints|47.39M|
+|deep_privacy_v1|FDF 128x128|SSD-based RetinaNet for face detection + Mask RCNN for keypoints|46.92M|
+|fdf128_rcnn512 (**recommended**)|FDF 128x128|SSD-based RetinaNet for face detection + Mask RCNN for keypoints|47.39M|
 |fdf128_retinanet512|FDF 128x128|SSD-based RetinaNet with ResNet50 backbone|49.84M|
 |fdf128_retinanet256|FDF 128x128|SSD-based RetinaNet with ResNet50 backbone|12.704M|
 |fdf128_retinanet128|FDF 128x128|SSD-based RetinaNet with ResNet50 backbone|3.17M|
