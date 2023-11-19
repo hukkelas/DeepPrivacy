@@ -2,7 +2,7 @@
     "_output_dir": "outputs",
     "_cache_dir": ".deep_privacy_cache",
     "model_size": 256,
-    "model_url": "http://folk.ntnu.no/haakohu/DeepPrivacy_fdf256_retinaface.ckpt",
+    "model_url": "https://api.loke.aws.unit.no/dlr-gui-backend-resources-content/v2/contents/links/caca525d-d087-49e7-b266-f2d4ad71123f29478e2b-b985-4602-bb51-688d4860497361e7f882-c7d0-4203-a66e-c027b501598d",
     "models": {
         "max_imsize": 256,
         "min_imsize": 8,
