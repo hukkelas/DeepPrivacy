@@ -61,7 +61,7 @@ class DistModel(BaseModel):
             if(not is_train):
                 #                print('Loading model from: %s'%model_path)
                 state_dict = torch.hub.load_state_dict_from_url(
-                    "http://folk.ntnu.no/haakohu/checkpoints/perceptual_similarity/alex.pth", **kw)
+                    "https://raw.githubusercontent.com/hukkelas/DeepPrivacy/master/alex.pth", **kw)
                 self.net.load_state_dict(state_dict, strict=False)
 
         elif(self.model == 'net'):  # pretrained network

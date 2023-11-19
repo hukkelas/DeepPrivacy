@@ -3,7 +3,7 @@ _base_config_ = "base.py"
 
 model_size = 512
 
-model_url = "http://folk.ntnu.no/haakohu/checkpoints/step_42000000.ckpt"
+model_url = "https://api.loke.aws.unit.no/dlr-gui-backend-resources-content/v2/contents/links/ab71cc2c-82bd-4fa7-8801-f10ff5a852246198eba4-bf7a-4e7e-9ff3-8ff6fe7f102c04c5e41b-2916-41a0-aa2b-e7a939e6f0d5"
 
 models = dict(
     scalar_pose_input=False,

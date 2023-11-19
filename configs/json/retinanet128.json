@@ -1,0 +1,219 @@
+{
+    "_output_dir": "outputs",
+    "_cache_dir": ".deep_privacy_cache",
+    "model_size": 128,
+    "model_url": "http://folk.ntnu.no/haakohu/checkpoints/fdf/retinanet128.ckpt",
+    "models": {
+        "max_imsize": 128,
+        "min_imsize": 8,
+        "pose_size": 10,
+        "image_channels": 3,
+        "conv_size": {
+            "4": 128,
+            "8": 128,
+            "16": 128,
+            "32": 128,
+            "64": 64,
+            "128": 32,
+            "256": 16,
+            "512": 8
+        },
+        "generator": {
+            "scalar_pose_input": true,
+            "type": "MSGGenerator",
+            "unet": {
+                "enabled": true,
+                "residual": false
+            },
+            "min_fmap_resolution": 4,
+            "use_skip": true,
+            "z_shape": [
+                32,
+                4,
+                4
+            ],
+            "conv2d_config": {
+                "pixel_normalization": true,
+                "leaky_relu_nslope": 0.2,
+                "normalization": "pixel_wise",
+                "conv": {
+                    "type": "conv",
+                    "wsconv": true,
+                    "gain": 1,
+                    "variance_pad": 0.2
+                },
+                "probabilistic": {
+                    "lrelu_approximation": false,
+                    "input_var": 0.002,
+                    "input_missing_var": 0.5,
+                    "sample_output": false
+                }
+            },
+            "residual": false
+        },
+        "discriminator": {
+            "type": "Discriminator",
+            "residual": true,
+            "scalar_pose_input": false,
+            "scalar_pose_input_imsize": 32,
+            "min_fmap_resolution": 4,
+            "conv_multiplier": 1,
+            "conv2d_config": {
+                "leaky_relu_nslope": 0.2,
+                "normalization": null,
+                "conv": {
+                    "type": "conv",
+                    "wsconv": true,
+                    "gain": 1
+                }
+            }
+        }
+    },
+    "trainer": {
+        "hooks": [
+            {
+                "type": "RunningAverageHook"
+            },
+            {
+                "type": "CheckpointHook",
+                "ims_per_checkpoint": 200000.0
+            },
+            {
+                "type": "SigTermHook"
+            },
+            {
+                "type": "ImageSaveHook",
+                "ims_per_save": 100000.0,
+                "n_diverse_samples": 5
+            },
+            {
+                "type": "MetricHook",
+                "ims_per_log": 200000.0,
+                "lpips_batch_size": 128,
+                "fid_batch_size": 8,
+                "min_imsize_to_calculate": 128
+            },
+            {
+                "type": "StatsLogger",
+                "num_ims_per_log": 500
+            }
+        ],
+        "progressive": {
+            "transition_iters": 1200000.0,
+            "minibatch_repeats": 4,
+            "enabled": false
+        },
+        "batch_size_schedule": {
+            "4": 256,
+            "8": 256,
+            "16": 256,
+            "32": 128,
+            "64": 96,
+            "128": 32,
+            "256": 32
+        },
+        "optimizer": {
+            "learning_rate": 0.001,
+            "amp_opt_level": "O1",
+            "lazy_regularization": true
+        }
+    },
+    "adversarial_loss": "WGANCriterion",
+    "discriminator_criterions": {
+        "0": {
+            "type": "WGANCriterion",
+            "fake_index": -1
+        },
+        "1": {
+            "type": "GradientPenalty",
+            "lambd": 10,
+            "mask_region_only": true,
+            "norm": "L2",
+            "distance": "clamp",
+            "lazy_reg_interval": 16,
+            "mask_decoder_gradient": false,
+            "fake_index": -1
+        },
+        "2": {
+            "type": "EpsilonPenalty",
+            "weight": 0.001,
+            "fake_index": -1
+        }
+    },
+    "generator_criterions": {
+        "0": {
+            "type": "WGANCriterion",
+            "fake_index": -1
+        }
+    },
+    "dataset_type": "FDFRetinaNetPose",
+    "data_root": "/work/haakohu/deep_privacy/data/fdf",
+    "data_train": {
+        "dataset": {
+            "type": "FDFRetinaNetPose",
+            "dirpath": "data/fdf/train",
+            "percentage": 1.0
+        },
+        "transforms": [
+            {
+                "type": "RandomFlip",
+                "flip_ratio": 0.5
+            },
+            {
+                "type": "FlattenLandmark"
+            }
+        ],
+        "loader": {
+            "shuffle": true,
+            "num_workers": 16,
+            "drop_last": true
+        }
+    },
+    "data_val": {
+        "dataset": {
+            "type": "FDFRetinaNetPose",
+            "dirpath": "data/fdf/val",
+            "percentage": 0.2
+        },
+        "transforms": [
+            {
+                "type": "FlattenLandmark"
+            }
+        ],
+        "loader": {
+            "shuffle": false,
+            "num_workers": 16,
+            "drop_last": true
+        }
+    },
+    "anonymizer": {
+        "truncation_level": 0,
+        "save_debug": false,
+        "batch_size": 1,
+        "fp16_inference": false,
+        "jit_trace": false,
+        "detector_cfg": {
+            "type": "BaseDetector",
+            "keypoint_threshold": 0.2,
+            "densepose_threshold": 0.3,
+            "simple_expand": true,
+            "align_faces": false,
+            "resize_background": true,
+            "face_detector_cfg": {
+                "name": "RetinaNetResNet50",
+                "confidence_threshold": 0.3,
+                "nms_iou_threshold": 0.3,
+                "max_resolution": 1080,
+                "fp16_inference": true,
+                "clip_boxes": true
+            }
+        }
+    },
+    "landmarks": [
+        "Left Eye",
+        "Right Eye",
+        "Nose",
+        "Mouth (Left)",
+        "Mouth (Right)"
+    ]
+}

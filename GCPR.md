@@ -30,6 +30,7 @@ python3 mask_infer.py -c config_path.py -i image_file.png -m mask_path -t target
 ```
 
 ### Tasble 1 Models and pretrained checkpoints
+The link to the model checkpoints will be deprecated in a couple of months. If they do not work, you can download the models from here: [https://bird.unit.no/resources/91b243f2-0807-4e93-881e-ff1717dabc48/content](https://bird.unit.no/resources/91b243f2-0807-4e93-881e-ff1717dabc48/content)
 
 | Configs | FDF | Places2 |
 |---------|--------|-----|

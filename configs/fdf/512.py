@@ -1,7 +1,7 @@
 
 _base_config_ = "base.py"
 model_size = 512
-model_url = "http://folk.ntnu.no/haakohu/checkpoints/fdf128_model512.ckpt"
+model_url = "https://api.loke.aws.unit.no/dlr-gui-backend-resources-content/v2/contents/links/0940803d-1a2c-4b54-9c1d-0d3aeb80c5a8970f7dd4-bde6-4120-9d3e-5fad937eef2b7b0544e2-8c00-43c2-9193-f56679740872"
 models = dict(
     scalar_pose_input=True,
     conv_size={
